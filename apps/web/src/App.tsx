@@ -11,10 +11,12 @@ import { SettingsPage } from "@/pages/settings";
 import { UsagePage } from "@/pages/usage";
 
 export default function App() {
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, "") || undefined;
+
   return (
     <ThemeProvider>
       <TooltipProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={basename}>
           <Routes>
             <Route element={<AdminLayout />}>
               <Route index element={<PullPage />} />

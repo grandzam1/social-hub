@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "apps/api/**"
+      - "apps/web/**"
       - ".github/workflows/deploy-cloudflare.yml"
       - "package.json"
   workflow_dispatch:
@@ -17,9 +18,6 @@ jobs:
   deploy:
     name: Deploy social-hub
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/api
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,10 +27,24 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/api/package-lock.json
+          cache-dependency-path: |
+            apps/api/package-lock.json
+            apps/web/package-lock.json
 
-      - name: Install dependencies
+      - name: Install API deps
+        working-directory: apps/api
         run: npm ci
+
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Build admin SPA into Worker assets
+        run: |
+          VITE_BASE=/admin/ npm run build --prefix apps/web
+          rm -rf apps/api/public/admin
+          cp -r apps/web/dist apps/api/public/admin
+          test -f apps/api/public/admin/index.html
 
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3

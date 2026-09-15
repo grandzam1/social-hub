@@ -634,6 +634,61 @@ app.get("/vendor/zustand/:file", async (c) => {
   return c.body(body);
 });
 
+/** New shadcn admin SPA (Vite build copied to public/admin). */
+app.get("/admin", (c) => c.redirect("/admin/", 302));
+
+app.get("/admin/", async (c) => {
+  const html = await sendPublic(c, "admin/index.html", "text/html; charset=utf-8");
+  if (!html) {
+    return c.text(
+      "Admin UI not built. Run: VITE_BASE=/admin/ npm run build --prefix apps/web && rm -rf apps/api/public/admin && cp -r apps/web/dist apps/api/public/admin",
+      404,
+    );
+  }
+  if (html instanceof Response) return html;
+  return c.body(html);
+});
+
+app.get("/admin/*", async (c) => {
+  const pathname = new URL(c.req.url).pathname;
+  // Serve hashed assets / files with an extension from ASSETS or public/
+  if (/\.[a-zA-Z0-9]+$/.test(pathname)) {
+    const rel = pathname.replace(/^\//, "");
+    if (c.env?.ASSETS) {
+      const res = await c.env.ASSETS.fetch(new URL(pathname, c.req.url));
+      if (res.ok) return res;
+    } else if (publicDir) {
+      const filePath = resolve(publicDir, rel);
+      if (existsSync(filePath)) {
+        const ext = filePath.split(".").pop()?.toLowerCase();
+        const type =
+          ext === "js" || ext === "mjs"
+            ? "application/javascript; charset=utf-8"
+            : ext === "css"
+              ? "text/css; charset=utf-8"
+              : ext === "svg"
+                ? "image/svg+xml"
+                : ext === "png"
+                  ? "image/png"
+                  : ext === "woff2"
+                    ? "font/woff2"
+                    : "application/octet-stream";
+        const body = readFileSync(filePath);
+        c.header("Content-Type", type);
+        c.header("Cache-Control", "public, max-age=31536000, immutable");
+        return c.body(body);
+      }
+    }
+    return c.text("missing", 404);
+  }
+
+  // SPA client routes → index.html
+  const html = await sendPublic(c, "admin/index.html", "text/html; charset=utf-8");
+  if (!html) return c.text("Admin UI missing", 404);
+  if (html instanceof Response) return html;
+  return c.body(html);
+});
+
   // Health should report runtime
   return app;
 }

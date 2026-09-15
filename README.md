@@ -29,9 +29,19 @@ npm run dev:api   # http://127.0.0.1:8787
 npm run dev:web   # http://127.0.0.1:5173  (proxies /api → :8787)
 ```
 
-Admin routes (web): `/` Pull · `/batch` · `/scraps` · `/settings` · `/docs`
+Admin routes (web local): `/` Pull · `/batch` · `/scraps` · `/usage` · `/settings` · `/docs`
 
-Legacy vanilla pages stay on the API origin (`/`, `/batch`, `/scraps`) until you deprecate them.
+**Production URLs (same Worker):**
+- Old theme: `https://social-hub.kelvinchristian144.workers.dev/`
+- New admin: `https://social-hub.kelvinchristian144.workers.dev/admin/`
+
+Legacy vanilla pages stay on the API origin (`/`, `/batch`, `/scraps`).
+
+Deploy (builds admin into `apps/api/public/admin` then Wrangler):
+
+```bash
+npm run cf:deploy
+```
 
 Optional Inngest:
 

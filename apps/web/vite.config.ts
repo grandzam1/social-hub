@@ -6,8 +6,12 @@ import { defineConfig } from "vite";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
+// Production deploy mounts the SPA under /admin/ on the same Worker as the API.
+const base = process.env.VITE_BASE || "/";
+
 // https://vite.dev/config/
 export default defineConfig({
+  base,
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

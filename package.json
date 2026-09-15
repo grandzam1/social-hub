@@ -7,6 +7,7 @@
     "dev:web": "npm run dev --prefix apps/web",
     "dev:inngest": "npx inngest-cli@latest dev -u http://127.0.0.1:8787/api/inngest",
     "build:web": "npm run build --prefix apps/web",
+    "build:admin": "VITE_BASE=/admin/ npm run build --prefix apps/web && node -e \"const fs=require('fs');const p='apps/api/public/admin';fs.rmSync(p,{recursive:true,force:true});fs.cpSync('apps/web/dist',p,{recursive:true});console.log('Copied admin →',p)\"",
     "install:web": "npm install --prefix apps/web",
     "test:inngest-cloud": "node scripts/test-inngest-cloud.mjs",
     "save-media": "node scripts/automate-save-media.mjs",
@@ -19,7 +20,7 @@
     "cf:check": "node scripts/cf-check.mjs",
     "cf:login": "npm run cf:login --prefix apps/api",
     "cf:dry": "npm run cf:dry --prefix apps/api",
-    "cf:deploy": "npm run cf:deploy --prefix apps/api"
+    "cf:deploy": "npm run build:admin && npm run cf:deploy --prefix apps/api"
   },
   "devDependencies": {
     "concurrently": "^10.0.5"
