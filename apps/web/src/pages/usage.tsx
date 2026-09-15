@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -48,7 +49,25 @@ function fmtValue(n: number | null, unit: ServiceUsage["unit"]) {
   return `${n.toLocaleString()} ${label}`.trim();
 }
 
-function ProgressBar({
+function StatusDot({
+  tone,
+}: {
+  tone: "live" | "tracked" | "idle";
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        tone === "live" && "bg-emerald-500",
+        tone === "tracked" && "bg-sky-500",
+        tone === "idle" && "bg-muted-foreground/40",
+      )}
+    />
+  );
+}
+
+function UsageIndicator({
   given,
   used,
   remaining,
@@ -57,12 +76,43 @@ function ProgressBar({
   used: number | null;
   remaining: number | null;
 }) {
-  // Only draw a bar when we have a real available amount and used/remaining.
-  if (given == null || given <= 0 || used == null || remaining == null) {
-    return null;
+  // Quota-backed: used vs remaining against a known given amount.
+  if (given != null && given > 0 && used != null && remaining != null) {
+    const pctUsed = Math.min(100, Math.max(0, (used / given) * 100));
+    const pctLeft = Math.min(100, Math.max(0, (remaining / given) * 100));
+
+    return (
+      <div className="space-y-1.5">
+        <div
+          className="flex h-2.5 overflow-hidden rounded-full bg-muted"
+          role="meter"
+          aria-valuemin={0}
+          aria-valuemax={given}
+          aria-valuenow={remaining}
+          aria-label="Remaining"
+        >
+          <div
+            className="bg-primary/85 transition-[width]"
+            style={{ width: `${pctUsed}%` }}
+            title="Used"
+          />
+          <div
+            className="bg-primary/25 transition-[width]"
+            style={{ width: `${pctLeft}%` }}
+            title="Remaining"
+          />
+        </div>
+        <p className="font-mono text-[11px] text-muted-foreground">
+          {Math.round(pctLeft)}% remaining
+        </p>
+      </div>
+    );
   }
-  const pctUsed = Math.min(100, Math.max(0, (used / given) * 100));
-  const pctLeft = Math.min(100, Math.max(0, (remaining / given) * 100));
+
+  // No vendor quota (Airtable / R2): show a used-only activity indicator.
+  if (used == null) return null;
+
+  const active = used > 0;
 
   return (
     <div className="space-y-1.5">
@@ -70,23 +120,20 @@ function ProgressBar({
         className="flex h-2.5 overflow-hidden rounded-full bg-muted"
         role="meter"
         aria-valuemin={0}
-        aria-valuemax={given}
-        aria-valuenow={remaining}
-        aria-label="Remaining"
+        aria-valuemax={active ? used : 1}
+        aria-valuenow={used}
+        aria-label="Used"
       >
         <div
-          className="bg-primary/85 transition-[width]"
-          style={{ width: `${pctUsed}%` }}
+          className={cn(
+            "transition-[width]",
+            active ? "w-full bg-sky-500/80" : "w-0 bg-transparent",
+          )}
           title="Used"
-        />
-        <div
-          className="bg-primary/25 transition-[width]"
-          style={{ width: `${pctLeft}%` }}
-          title="Remaining"
         />
       </div>
       <p className="font-mono text-[11px] text-muted-foreground">
-        {Math.round(pctLeft)}% remaining
+        {active ? "Usage recorded · no quota" : "No usage recorded"}
       </p>
     </div>
   );
@@ -95,13 +142,24 @@ function ProgressBar({
 function ServiceCard({ row }: { row: ServiceUsage }) {
   const hasBalance =
     row.given != null || row.remaining != null || row.used != null;
+  const isLive = row.source === "scrapecreators";
+  const hasUsed = row.used != null && row.used > 0;
+  const tone = isLive ? "live" : hasUsed ? "tracked" : "idle";
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-lg">{row.service}</CardTitle>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <StatusDot tone={tone} />
+            {row.service}
+          </CardTitle>
+          <Badge variant="secondary" className="font-normal">
+            {isLive ? "Live" : "Tracked"}
+          </Badge>
+        </div>
         <CardDescription className="text-xs">
-          {row.source === "scrapecreators"
+          {isLive
             ? "Live balance from ScrapeCreators; used from their usage log"
             : "Recorded in usage_events (no vendor quota available)"}
         </CardDescription>
@@ -136,7 +194,7 @@ function ServiceCard({ row }: { row: ServiceUsage }) {
                 </dd>
               </div>
             </dl>
-            <ProgressBar
+            <UsageIndicator
               given={row.given}
               used={row.used}
               remaining={row.remaining}
