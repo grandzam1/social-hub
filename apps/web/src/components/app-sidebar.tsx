@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import {
+  ActivityIcon,
   BookOpenIcon,
   DownloadIcon,
   LayersIcon,
@@ -24,6 +25,7 @@ const nav = [
   { title: "Pull media", href: "/", icon: Link2Icon },
   { title: "Batch", href: "/batch", icon: DownloadIcon },
   { title: "Scraps", href: "/scraps", icon: LayersIcon },
+  { title: "Usage", href: "/usage", icon: ActivityIcon },
   { title: "API docs", href: "/docs", icon: BookOpenIcon },
   { title: "Settings", href: "/settings", icon: SettingsIcon },
 ];

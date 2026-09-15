@@ -37,8 +37,9 @@ Typical status codes: `400` validation, `500` unexpected / upstream failure.
 9. [GET /api/scraps](#get-apiscraps)
 10. [GET /api/credits](#get-apicredits)
 11. [GET /api/credits/history](#get-apicreditshistory)
-12. [Static UI routes](#static-ui-routes)
-13. [Where each endpoint is used](#where-each-endpoint-is-used)
+12. [GET /api/usage](#get-apiusage)
+13. [Static UI routes](#static-ui-routes)
+14. [Where each endpoint is used](#where-each-endpoint-is-used)
 
 ---
 
@@ -489,6 +490,36 @@ Platforms (from code):
 **Errors:** `500` with `{ "ok": false, "error": "…" }`
 
 **Used by:** UI credits panel — `apps/api/public/credits.js`.
+
+---
+
+## GET /api/usage
+
+**What it does:** Summarizes local `usage_events` (Airtable API request counts, R2 upload bytes, optional ScrapeCreators credit snapshots) and returns **live** ScrapeCreators balance. Does not invent vendor quotas. See `docs/usage-events.md`.
+
+**Auth:** none (needs Airtable when `AIRTABLE_USAGE_EVENTS_TABLE` is set; ScrapeCreators for live credits)
+
+**Success `200` (shape):**
+
+```json
+{
+  "ok": true,
+  "configured": true,
+  "creditsRemaining": 76,
+  "creditsSource": "scrapecreators",
+  "airtableRequests": 12,
+  "r2UploadBytes": 1234567,
+  "r2UploadCount": 3,
+  "lastCreditSnapshot": 76,
+  "lastCreditSnapshotAt": "2026-09-15T08:00:00.000Z",
+  "byDay": [{ "day": "2026-09-15", "airtableRequests": 12, "r2UploadBytes": 1234567 }],
+  "events": []
+}
+```
+
+When the table env var is unset: `configured: false` and empty aggregates.
+
+**Used by:** Admin web UI `/usage`.
 
 ---
 

@@ -8,6 +8,7 @@ import { DocsPage } from "@/pages/docs";
 import { PullPage } from "@/pages/pull";
 import { ScrapsPage } from "@/pages/scraps";
 import { SettingsPage } from "@/pages/settings";
+import { UsagePage } from "@/pages/usage";
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
               <Route index element={<PullPage />} />
               <Route path="batch" element={<BatchPage />} />
               <Route path="scraps" element={<ScrapsPage />} />
+              <Route path="usage" element={<UsagePage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="docs" element={<DocsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

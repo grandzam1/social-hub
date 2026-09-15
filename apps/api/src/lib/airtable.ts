@@ -1,3 +1,5 @@
+import { recordAirtableRequest } from "./usage.js";
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -63,6 +65,12 @@ async function airtableFetch(path: string, init?: RequestInit) {
           "Content-Type": "application/json",
           ...(init?.headers ?? {}),
         },
+      });
+      // Track every attempt that received an HTTP response (including 429/5xx).
+      recordAirtableRequest({
+        method,
+        path,
+        status: res.status,
       });
       if (res.status === 429 || res.status >= 500) {
         const body = await res.text();

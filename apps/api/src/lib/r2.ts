@@ -1,4 +1,5 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { recordR2Upload } from "./usage.js";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -88,6 +89,8 @@ export async function uploadToR2(options: {
       ContentType: options.contentType,
     }),
   );
+
+  recordR2Upload({ bytes: options.body.length, key: options.key });
 
   return {
     key: options.key,

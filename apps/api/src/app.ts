@@ -10,6 +10,12 @@ import { scrapePostPipeline } from "./lib/scrape-post.js";
 import { listScraps } from "./lib/scraps.js";
 import { listRecentPosts } from "./lib/recent-posts.js";
 import { getCreditBalance, getCreditUsage } from "./lib/scrapecreators.js";
+import {
+  listUsageEvents,
+  recordScrapeCreatorsCreditSnapshot,
+  summarizeUsageEvents,
+  usageTrackingConfigured,
+} from "./lib/usage.js";
 
 export type WorkerBindings = {
   ASSETS?: Fetcher;
@@ -169,6 +175,7 @@ app.post("/api/scrape-post", async (c) => {
 app.get("/api/credits", async (c) => {
   try {
     const remaining = await getCreditBalance();
+    recordScrapeCreatorsCreditSnapshot(remaining);
     return c.json({ ok: true, remaining });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -185,6 +192,7 @@ app.get("/api/credits/history", async (c) => {
     let warning: string | undefined;
     try {
       remaining = await getCreditBalance();
+      if (remaining != null) recordScrapeCreatorsCreditSnapshot(remaining);
     } catch (err) {
       warning = err instanceof Error ? err.message : String(err);
       console.error("[api/credits/history] balance", warning);
@@ -194,6 +202,97 @@ app.get("/api/credits/history", async (c) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[api/credits/history]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/**
+ * Local usage ledger (Airtable usage_events) + live ScrapeCreators balance.
+ * Returns simple given / used / remaining per service — no invented quotas.
+ */
+app.get("/api/usage", async (c) => {
+  try {
+    const configured = usageTrackingConfigured();
+    let events: Awaited<ReturnType<typeof listUsageEvents>> = [];
+    let warning: string | undefined;
+    if (configured) {
+      try {
+        events = await listUsageEvents(100);
+      } catch (err) {
+        warning = err instanceof Error ? err.message : String(err);
+        console.error("[api/usage] list", warning);
+      }
+    }
+
+    const summary = summarizeUsageEvents(events);
+
+    let creditsRemaining: number | null = null;
+    let creditsUsed: number | null = null;
+    let creditsWarning: string | undefined;
+    try {
+      creditsRemaining = await getCreditBalance();
+      if (creditsRemaining != null) {
+        recordScrapeCreatorsCreditSnapshot(creditsRemaining);
+      }
+    } catch (err) {
+      creditsWarning = err instanceof Error ? err.message : String(err);
+    }
+    try {
+      const history = await getCreditUsage(1);
+      creditsUsed = history.reduce(
+        (sum, row) => sum + (Number.isFinite(row.credits) ? row.credits : 0),
+        0,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      creditsWarning = creditsWarning ? `${creditsWarning}; ${msg}` : msg;
+    }
+
+    // given = remaining + used only when both come from ScrapeCreators APIs
+    const creditsGiven =
+      creditsRemaining != null && creditsUsed != null
+        ? creditsRemaining + creditsUsed
+        : null;
+
+    const services = [
+      {
+        service: "ScrapeCreators",
+        unit: "credits" as const,
+        given: creditsGiven,
+        used: creditsUsed,
+        remaining: creditsRemaining,
+        source: "scrapecreators",
+      },
+      {
+        service: "Airtable",
+        unit: "requests" as const,
+        // No vendor quota in-app — only our recorded request count.
+        given: null,
+        used: summary.airtableRequests,
+        remaining: null,
+        source: "usage_events",
+      },
+      {
+        service: "R2",
+        unit: "bytes" as const,
+        // No bucket quota in-app — only recorded upload bytes.
+        given: null,
+        used: summary.r2UploadBytes,
+        remaining: null,
+        source: "usage_events",
+      },
+    ];
+
+    return c.json({
+      ok: true,
+      configured,
+      warning,
+      creditsWarning,
+      services,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/usage]", message);
     return c.json({ ok: false, error: message }, 500);
   }
 });
