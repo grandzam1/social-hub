@@ -1,0 +1,84 @@
+{
+  "at": "2026-09-13T17:28:40.231Z",
+  "helloIds": {
+    "ids": [
+      "01M2DX0H5EKX8JBCMRWJMQNR0K"
+    ]
+  },
+  "scrapePayload": {
+    "platform": "tiktok",
+    "post": {
+      "platformPostId": "7517114944362499342",
+      "caption": "You can say whatever you want about the WNBA is but it’s never boring",
+      "likes": 103522,
+      "comments": 1589,
+      "shares": 5670,
+      "saves": 2671,
+      "views": 1041124,
+      "url": "https://www.tiktok.com/@stoolpresidente/video/7517114944362499342",
+      "author": "stoolpresidente"
+    }
+  },
+  "results": [
+    {
+      "name": "1. Hono /health",
+      "ok": true,
+      "detail": "58ms keys event=true signing=true"
+    },
+    {
+      "name": "2. Inngest Dev Server",
+      "ok": true,
+      "detail": "4ms status=200"
+    },
+    {
+      "name": "3. Cloud event ingest",
+      "ok": true,
+      "detail": "1030ms {\"ids\":[\"01M2DX0JW6ND04P33SW3PK9JMW\"],\"status\":200}\n"
+    },
+    {
+      "name": "4. Local Inngest hello send",
+      "ok": true,
+      "detail": "17ms {\"ok\":true,\"ids\":{\"ids\":[\"01M2DX0H5EKX8JBCMRWJMQNR0K\"]}}"
+    },
+    {
+      "name": "5. Dev Server received social/hello",
+      "ok": true,
+      "detail": "6ms events=2"
+    },
+    {
+      "name": "6. Concurrency x8 hello",
+      "ok": true,
+      "detail": "86ms ok=8/8"
+    },
+    {
+      "name": "7. ScrapeCreators credit balance",
+      "ok": true,
+      "detail": "2082ms credits=100"
+    },
+    {
+      "name": "8. ScrapeCreators TikTok video",
+      "ok": true,
+      "detail": "2573ms id=7517114944362499342 cached=true"
+    },
+    {
+      "name": "9. ScrapeCreators X tweet",
+      "ok": true,
+      "detail": "575ms id=1935730646267158797"
+    },
+    {
+      "name": "10. ScrapeCreators Instagram post",
+      "ok": true,
+      "detail": "708ms shortcode=DLDXI0fylTC"
+    },
+    {
+      "name": "11. Airtable PAT in .env",
+      "ok": false,
+      "detail": "MISSING — Composio leg used by agent instead"
+    },
+    {
+      "name": "12. Airtable REST upsert",
+      "ok": false,
+      "detail": "skipped — need AIRTABLE_API_KEY (Personal Access Token)"
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing env var: ${name}`);
+  return value;
+}
+
+function client() {
+  const accountId = required("R2_ACCOUNT_ID");
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: required("R2_ACCESS_KEY_ID"),
+      secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
+    },
+  });
+}
+
+/** Download original CDN media (image/video). */
+export async function downloadCdnUrl(
+  url: string,
+): Promise<{ buffer: Buffer; contentType: string; bytes: number }> {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Accept: "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      Referer: url.includes("twimg.com")
+        ? "https://x.com/"
+        : url.includes("cdninstagram.com") || url.includes("instagram.com")
+          ? "https://www.instagram.com/"
+          : undefined,
+    },
+    redirect: "follow",
+    // Large X videos can exceed this — callers should prefer async for big files
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!res.ok) throw new Error(`CDN download failed ${res.status}: ${url}`);
+  const contentType =
+    res.headers.get("content-type") ?? "application/octet-stream";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType, bytes: buffer.length };
+}
+
+/** HEAD to learn size before committing to a sync download. */
+export async function headCdnUrl(
+  url: string,
+): Promise<{ contentLength?: number; contentType?: string }> {
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Referer: url.includes("twimg.com") ? "https://x.com/" : undefined,
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const len = res.headers.get("content-length");
+    return {
+      contentLength: len ? Number(len) : undefined,
+      contentType: res.headers.get("content-type") ?? undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** Upload bytes to R2 and return our hosted public URL. */
+export async function uploadToR2(options: {
+  key: string;
+  body: Buffer;
+  contentType: string;
+}): Promise<{ key: string; publicUrl: string; bytes: number }> {
+  const bucket = process.env.R2_BUCKET ?? "scrape-kit-media";
+  const publicBase =
+    process.env.R2_PUBLIC_BASE_URL ??
+    "https://pub-dd096d99ffc0494a9164b431ea60c9c6.r2.dev";
+
+  await client().send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: options.key,
+      Body: options.body,
+      ContentType: options.contentType,
+    }),
+  );
+
+  return {
+    key: options.key,
+    bytes: options.body.length,
+    publicUrl: `${publicBase.replace(/\/$/, "")}/${options.key}`,
+  };
+}
+
+export function guessExt(contentType: string, mediaType?: string): string {
+  if (contentType.includes("mp4") || mediaType === "video") return "mp4";
+  if (contentType.includes("webm")) return "webm";
+  if (contentType.includes("gif") || mediaType === "gif") return "gif";
+  if (contentType.includes("png")) return "png";
+  if (contentType.includes("webp")) return "webp";
+  return "jpg";
+}

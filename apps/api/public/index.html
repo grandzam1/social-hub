@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Social Hub — Drop a link</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/ui.css?v=22" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("social-hub.theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div id="creditsBackdrop" class="credits-backdrop" hidden></div>
+    <aside id="creditsPanel" class="credits-panel" hidden aria-label="Credit charge history">
+      <div class="credits-panel-head">
+        <h2>Charge history</h2>
+        <button type="button" id="creditsClose" class="credits-close" aria-label="Close">×</button>
+      </div>
+      <div id="creditsHistory" class="credits-history"></div>
+    </aside>
+    <main class="shell">
+      <nav class="topnav">
+        <div class="topnav-links">
+          <a href="/" aria-current="page">Pull media</a>
+          <a href="/batch">Batch</a>
+          <a href="/scraps">Saved Scraps</a>
+          <a href="/docs/api">API</a>
+        </div>
+        <div class="topnav-actions">
+          <button
+            type="button"
+            id="themeToggle"
+            class="theme-toggle"
+            aria-pressed="false"
+            aria-label="Switch to dark theme"
+            data-theme="light"
+          >
+            <span class="theme-toggle-icon" aria-hidden="true"></span>
+            <span class="theme-toggle-label">Dark</span>
+          </button>
+          <button
+            type="button"
+            id="creditsBar"
+            class="credits-bar"
+            aria-expanded="false"
+            aria-controls="creditsPanel"
+          >
+            <span class="credits-chip">remaining —</span>
+          </button>
+        </div>
+      </nav>
+
+      <header class="mast">
+        <p class="mark">Social Hub</p>
+        <h1>Paste a post. Watch it land.</h1>
+        <p class="lede">
+          Instagram, TikTok, or X — scrape → Airtable → your R2 copy.
+          Carousels keep slide order and save in parallel.
+        </p>
+      </header>
+
+      <form id="form" class="strip" autocomplete="off">
+        <label class="sr" for="url">Media link</label>
+        <div class="sprocket" aria-hidden="true"></div>
+        <input
+          id="url"
+          name="url"
+          type="url"
+          required
+          placeholder="https://www.instagram.com/p/… (carousel OK)"
+          spellcheck="false"
+        />
+        <div class="actions">
+          <label class="chk">
+            <input type="checkbox" id="saveR2" checked />
+            Save to R2
+          </label>
+          <button type="submit" id="go">Pull media</button>
+        </div>
+      </form>
+
+      <p id="status" class="status" hidden></p>
+      <section id="result" class="result" hidden></section>
+    </main>
+    <script src="/theme.js?v=21"></script>
+    <script src="/credits.js?v=20"></script>
+    <script src="/ui.js?v=20"></script>
+  </body>
+</html>

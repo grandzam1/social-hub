@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Batch download — Social Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/ui.css?v=22" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("social-hub.theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div id="creditsBackdrop" class="credits-backdrop" hidden></div>
+    <aside id="creditsPanel" class="credits-panel" hidden aria-label="Credit charge history">
+      <div class="credits-panel-head">
+        <h2>Charge history</h2>
+        <button type="button" id="creditsClose" class="credits-close" aria-label="Close">×</button>
+      </div>
+      <div id="creditsHistory" class="credits-history"></div>
+    </aside>
+    <main class="shell shell-wide">
+      <nav class="topnav">
+        <div class="topnav-links">
+          <a href="/">Pull media</a>
+          <a href="/batch" aria-current="page">Batch</a>
+          <a href="/scraps">Saved Scraps</a>
+          <a href="/docs/api">API</a>
+        </div>
+        <div class="topnav-actions">
+          <button
+            type="button"
+            id="themeToggle"
+            class="theme-toggle"
+            aria-pressed="false"
+            aria-label="Switch to dark theme"
+            data-theme="light"
+          >
+            <span class="theme-toggle-icon" aria-hidden="true"></span>
+            <span class="theme-toggle-label">Dark</span>
+          </button>
+          <button
+            type="button"
+            id="creditsBar"
+            class="credits-bar"
+            aria-expanded="false"
+            aria-controls="creditsPanel"
+          >
+            <span class="credits-chip">remaining —</span>
+          </button>
+        </div>
+      </nav>
+
+      <header class="mast">
+        <p class="mark">Fetch → select → download</p>
+        <h1>Recent posts</h1>
+        <p class="lede">
+          Browse a creator’s feed first. Searches stay saved in this browser
+          across reloads until you search another user or clear. Nothing hits R2
+          until you Download. A carousel is <strong>one post with several
+          files</strong> — selecting it saves every slide.
+        </p>
+      </header>
+
+      <form id="fetchForm" class="strip batch-strip" autocomplete="off">
+        <div class="sprocket" aria-hidden="true"></div>
+        <div class="smart-form">
+          <div class="platform-pills" role="radiogroup" aria-label="Platform">
+            <button type="button" class="platform-pill is-active" data-platform="x" aria-pressed="true">X</button>
+            <button type="button" class="platform-pill" data-platform="instagram" aria-pressed="false">Instagram</button>
+            <button type="button" class="platform-pill" data-platform="tiktok" aria-pressed="false">TikTok</button>
+          </div>
+          <input type="hidden" id="platform" name="platform" value="x" />
+
+          <label class="sr" for="handle">Profile or @handle</label>
+          <div class="smart-input-row">
+            <span id="handlePrefix" class="smart-prefix" aria-hidden="true">@</span>
+            <input
+              id="handle"
+              name="handle"
+              class="handle-input"
+              type="text"
+              placeholder="elonmusk or paste a profile URL"
+              spellcheck="false"
+              autocapitalize="off"
+              autocorrect="off"
+              inputmode="text"
+            />
+            <button type="submit" id="fetchBtn">Fetch posts</button>
+            <button type="button" id="clearSearchBtn" class="btn-ghost clear-search" hidden>
+              Clear search
+            </button>
+          </div>
+
+          <p id="smartHelp" class="smart-help" aria-live="polite">
+            Paste a profile link or type a username — platform is detected for you.
+          </p>
+          <div class="feed-filters" role="radiogroup" aria-label="Post filter">
+            <button type="button" class="feed-filter is-active" data-filter="media" aria-pressed="true">With media</button>
+            <button type="button" class="feed-filter" data-filter="original" aria-pressed="false">Original</button>
+            <button type="button" class="feed-filter" data-filter="all" aria-pressed="false">All</button>
+          </div>
+          <div id="recentHandles" class="recent-handles" hidden></div>
+        </div>
+      </form>
+
+      <p id="status" class="status" hidden></p>
+      <p id="note" class="status" hidden></p>
+      <p id="feedSummary" class="feed-summary" hidden></p>
+
+      <div id="toolbar" class="batch-toolbar" hidden>
+        <div class="batch-toolbar-left">
+          <button type="button" id="selectAll" class="btn-ghost">Select all</button>
+          <button type="button" id="deselectAll" class="btn-ghost">Deselect all</button>
+          <span id="selectedCount" class="selected-count">0 selected</span>
+        </div>
+        <button type="button" id="downloadBtn" class="btn-download" disabled>
+          Download selected
+        </button>
+      </div>
+
+      <section id="feed" class="feed-grid" aria-live="polite"></section>
+
+      <section id="progress" class="download-progress" hidden>
+        <h2>Downloading…</h2>
+        <ul id="progressList" class="progress-list"></ul>
+      </section>
+    </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "/vendor/zustand/vanilla.mjs": "/vendor/zustand/vanilla.mjs",
+          "/vendor/zustand/middleware.mjs": "/vendor/zustand/middleware.mjs"
+        }
+      }
+    </script>
+    <script src="/theme.js?v=21"></script>
+    <script src="/credits.js?v=19"></script>
+    <script type="module" src="/batch.js?v=23"></script>
+  </body>
+</html>

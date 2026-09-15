@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API docs — Social Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/ui.css?v=22" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("social-hub.theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <main class="shell shell-wide">
+      <nav class="topnav">
+        <div class="topnav-links">
+          <a href="/">Pull media</a>
+          <a href="/batch">Batch</a>
+          <a href="/scraps">Saved Scraps</a>
+          <a href="/docs/api" aria-current="page">API</a>
+        </div>
+        <div class="topnav-actions">
+          <button
+            type="button"
+            id="themeToggle"
+            class="theme-toggle"
+            aria-pressed="false"
+            aria-label="Switch to dark theme"
+            data-theme="light"
+          >
+            <span class="theme-toggle-icon" aria-hidden="true"></span>
+            <span class="theme-toggle-label">Dark</span>
+          </button>
+          <a class="credits-bar docs-raw-link" href="/docs/api.md">Raw .md</a>
+        </div>
+      </nav>
+
+      <article id="apiDoc" class="api-doc api-doc-preview" aria-live="polite">
+        <p class="muted">Loading docs…</p>
+      </article>
+    </main>
+
+    <script src="/theme.js?v=21"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+    <script>
+      (async () => {
+        const el = document.getElementById("apiDoc");
+        try {
+          const res = await fetch("/docs/api.md");
+          if (!res.ok) throw new Error(`Could not load docs (${res.status})`);
+          const md = await res.text();
+          if (typeof marked === "undefined" || !marked.parse) {
+            throw new Error("Markdown renderer failed to load");
+          }
+          marked.setOptions({ gfm: true, breaks: false });
+          el.innerHTML = marked.parse(md);
+
+          // Give headings stable ids for TOC links in the markdown
+          el.querySelectorAll("h1, h2, h3, h4").forEach((heading) => {
+            if (heading.id) return;
+            const id = heading.textContent
+              .trim()
+              .toLowerCase()
+              .replace(/[|:\/]/g, "")
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-|-$/g, "");
+            if (id) heading.id = id;
+          });
+
+          el.querySelectorAll('a[href^="#"]').forEach((a) => {
+            a.addEventListener("click", (e) => {
+              const raw = a.getAttribute("href").slice(1);
+              const id = decodeURIComponent(raw);
+              const target =
+                document.getElementById(id) ||
+                document.getElementById(
+                  id
+                    .toLowerCase()
+                    .replace(/[|:\/]/g, "")
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/^-|-$/g, ""),
+                );
+              if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: "smooth", block: "start" });
+                history.replaceState(null, "", `#${target.id}`);
+              }
+            });
+          });
+        } catch (err) {
+          el.innerHTML = `<p class="status err">${String(err.message || err)}</p>`;
+        }
+      })();
+    </script>
+  </body>
+</html>

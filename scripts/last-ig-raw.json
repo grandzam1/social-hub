@@ -1,0 +1,8 @@
+{
+  "success": false,
+  "credits_remaining": 97,
+  "credits_charged": 0,
+  "error": "bad_request",
+  "errorStatus": 400,
+  "message": "url must be an instagram link"
+}

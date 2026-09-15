@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Saved Scraps — Social Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/ui.css?v=22" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("social-hub.theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div id="creditsBackdrop" class="credits-backdrop" hidden></div>
+    <aside id="creditsPanel" class="credits-panel" hidden aria-label="Credit charge history">
+      <div class="credits-panel-head">
+        <h2>Charge history</h2>
+        <button type="button" id="creditsClose" class="credits-close" aria-label="Close">×</button>
+      </div>
+      <div id="creditsHistory" class="credits-history"></div>
+    </aside>
+    <main class="shell shell-wide">
+      <nav class="topnav">
+        <div class="topnav-links">
+          <a href="/">Pull media</a>
+          <a href="/batch">Batch</a>
+          <a href="/scraps" aria-current="page">Saved Scraps</a>
+          <a href="/docs/api">API</a>
+        </div>
+        <div class="topnav-actions">
+          <button
+            type="button"
+            id="themeToggle"
+            class="theme-toggle"
+            aria-pressed="false"
+            aria-label="Switch to dark theme"
+            data-theme="light"
+          >
+            <span class="theme-toggle-icon" aria-hidden="true"></span>
+            <span class="theme-toggle-label">Dark</span>
+          </button>
+          <button
+            type="button"
+            id="creditsBar"
+            class="credits-bar"
+            aria-expanded="false"
+            aria-controls="creditsPanel"
+          >
+            <span class="credits-chip">remaining —</span>
+          </button>
+        </div>
+      </nav>
+
+      <header class="mast">
+        <p class="mark">Your library</p>
+        <h1>Saved Scraps</h1>
+        <p class="lede">
+          Everything you’ve pulled — text, images, and videos — sorted by when
+          you saved them.
+        </p>
+      </header>
+
+      <div class="library-tools">
+        <div class="type-tabs" role="tablist" aria-label="Media type">
+          <button type="button" class="tab is-active" data-type="all">All</button>
+          <button type="button" class="tab" data-type="text">Text</button>
+          <button type="button" class="tab" data-type="image">Images</button>
+          <button type="button" class="tab" data-type="video">Videos</button>
+        </div>
+        <div class="tool-row">
+          <label class="sr" for="userFilter">User</label>
+          <select id="userFilter" class="select">
+            <option value="all">All users</option>
+          </select>
+          <label class="sr" for="search">Search</label>
+          <input
+            id="search"
+            class="search"
+            type="search"
+            placeholder="Search text or @user…"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+
+      <p id="libStatus" class="status">Loading scraps…</p>
+      <section id="grid" class="scrap-grid" aria-live="polite"></section>
+      <p id="empty" class="empty" hidden>
+        Nothing here yet. <a href="/">Pull a post</a> to start your library.
+      </p>
+    </main>
+    <script src="/theme.js?v=21"></script>
+    <script src="/credits.js?v=20"></script>
+    <script src="/scraps.js?v=20"></script>
+  </body>
+</html>

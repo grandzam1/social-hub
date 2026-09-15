@@ -1,0 +1,15 @@
+{
+  "name": "social-hub",
+  "private": true,
+  "scripts": {
+    "dev:api": "npm run dev --prefix apps/api",
+    "dev:inngest": "npx inngest-cli@latest dev -u http://127.0.0.1:8787/api/inngest",
+    "test:inngest-cloud": "node scripts/test-inngest-cloud.mjs",
+    "save-media": "node scripts/automate-save-media.mjs",
+    "save-media:sync": "node scripts/automate-save-media.mjs --sync",
+    "install:api": "npm install --prefix apps/api",
+    "sc": "node scripts/sc.mjs",
+    "sc:offline": "SC_MODE=offline node scripts/sc.mjs",
+    "sc:fixtures": "node scripts/sc.mjs fixture list"
+  }
+}

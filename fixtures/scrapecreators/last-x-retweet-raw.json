@@ -1,0 +1,583 @@
+{
+  "success": true,
+  "credits_remaining": 79,
+  "credits_charged": 1,
+  "__typename": "Tweet",
+  "core": {
+    "user_results": {
+      "result": {
+        "__typename": "User",
+        "affiliates_highlighted_label": {
+          "label": {
+            "badge": {
+              "url": "https://pbs.twimg.com/profile_images/1955359038532653056/OSHY3ewP_bigger.jpg"
+            },
+            "description": "X",
+            "url": {
+              "url": "https://twitter.com/X",
+              "urlType": "DeepLink"
+            },
+            "userLabelDisplayType": "Badge",
+            "userLabelType": "BusinessLabel"
+          }
+        },
+        "avatar": {
+          "image_url": "https://pbs.twimg.com/profile_images/2053244804520427520/m8mdWZCG_normal.jpg"
+        },
+        "core": {
+          "created_at": "Tue Jun 02 20:12:29 +0000 2009",
+          "name": "Elon Musk",
+          "screen_name": "elonmusk"
+        },
+        "dm_permissions": {
+          "can_dm": false
+        },
+        "follow_request_sent": false,
+        "has_graduated_access": true,
+        "id": "VXNlcjo0NDE5NjM5Nw==",
+        "is_blue_verified": true,
+        "legacy": {
+          "default_profile": false,
+          "default_profile_image": false,
+          "description": "https://t.co/ZdBx5WABYx",
+          "entities": {
+            "description": {
+              "urls": [
+                {
+                  "display_url": "Terafab.AI",
+                  "expanded_url": "http://Terafab.AI",
+                  "indices": [
+                    0,
+                    23
+                  ],
+                  "url": "https://t.co/ZdBx5WABYx"
+                }
+              ]
+            }
+          },
+          "fast_followers_count": 0,
+          "favourites_count": 247861,
+          "follow_request_sent": false,
+          "followers_count": 241660861,
+          "friends_count": 1406,
+          "has_custom_timelines": true,
+          "is_translator": false,
+          "listed_count": 170527,
+          "media_count": 4717,
+          "needs_phone_verification": false,
+          "normal_followers_count": 241660861,
+          "notifications": false,
+          "pinned_tweet_ids_str": [
+            "2098932438055469451"
+          ],
+          "possibly_sensitive": false,
+          "profile_banner_url": "https://pbs.twimg.com/profile_banners/44196397/1774145451",
+          "profile_interstitial_type": "",
+          "statuses_count": 108485,
+          "time_zone": "",
+          "translator_type": "none",
+          "url": "",
+          "utc_offset": 0,
+          "withheld_description": "",
+          "withheld_scope": ""
+        },
+        "location": {
+          "location": ""
+        },
+        "media_permissions": {
+          "can_media_tag": false
+        },
+        "parody_commentary_fan_label": "None",
+        "privacy": {
+          "protected": false
+        },
+        "professional": {
+          "category": [],
+          "professional_type": "Creator",
+          "rest_id": "1679729435447275522"
+        },
+        "profile_bio": {
+          "description": "https://t.co/ZdBx5WABYx"
+        },
+        "profile_image_shape": "Circle",
+        "relationship_perspectives": {
+          "blocked_by": false,
+          "blocking": false,
+          "followed_by": false,
+          "following": false,
+          "muting": false
+        },
+        "rest_id": "44196397",
+        "super_follow_eligible": false,
+        "super_followed_by": false,
+        "super_following": false,
+        "verification": {
+          "verified": false
+        }
+      }
+    }
+  },
+  "edit_control": {
+    "edit_tweet_ids": [
+      "2099051728318660621"
+    ],
+    "editable_until_msecs": "1789291505000",
+    "edits_remaining": "5",
+    "is_edit_eligible": true
+  },
+  "grok_analysis_button": true,
+  "grok_annotations": {
+    "is_image_editable_by_grok": true
+  },
+  "is_translatable": false,
+  "legacy": {
+    "bookmark_count": 304,
+    "bookmarked": false,
+    "conversation_id_str": "2099051728318660621",
+    "created_at": "Sun Sep 13 08:25:05 +0000 2026",
+    "display_text_range": [
+      0,
+      14
+    ],
+    "entities": {},
+    "favorite_count": 7862,
+    "favorited": false,
+    "full_text": "Lot of players",
+    "id_str": "2099051728318660621",
+    "is_quote_status": true,
+    "lang": "en",
+    "quote_count": 103,
+    "quoted_status_id_str": "2098922541293191227",
+    "quoted_status_permalink": {
+      "display": "x.com/diablo/status/…",
+      "expanded": "https://twitter.com/diablo/status/2098922541293191227",
+      "url": "https://t.co/s3Op3eYHLC"
+    },
+    "reply_count": 1309,
+    "retweet_count": 816,
+    "retweeted": false,
+    "user_id_str": "44196397"
+  },
+  "quoted_status_result": {
+    "result": {
+      "__typename": "Tweet",
+      "content_disclosure": {
+        "ai_generated_disclosure": {
+          "can_edit": true,
+          "has_ai_generated_media": false
+        }
+      },
+      "core": {
+        "user_results": {
+          "result": {
+            "__typename": "User",
+            "affiliates_highlighted_label": {
+              "label": {
+                "badge": {
+                  "url": "https://pbs.twimg.com/profile_images/1986112103275708416/Zb-H0Gz3_bigger.jpg"
+                },
+                "description": "Blizzard Entertainment",
+                "url": {
+                  "url": "https://twitter.com/Blizzard_Ent",
+                  "urlType": "DeepLink"
+                },
+                "userLabelDisplayType": "Badge",
+                "userLabelType": "BusinessLabel"
+              }
+            },
+            "avatar": {
+              "image_url": "https://pbs.twimg.com/profile_images/1667287416154243072/i4pAQMRB_normal.jpg"
+            },
+            "core": {
+              "created_at": "Tue Jul 28 22:39:00 +0000 2009",
+              "name": "Diablo",
+              "screen_name": "Diablo"
+            },
+            "dm_permissions": {
+              "can_dm": false
+            },
+            "follow_request_sent": false,
+            "has_graduated_access": true,
+            "id": "VXNlcjo2MTA0MDgzMw==",
+            "is_blue_verified": true,
+            "legacy": {
+              "default_profile": false,
+              "default_profile_image": false,
+              "description": "ESRB Rating: MATURE with Blood and Gore, Intense Violence, Language. #DiabloIV is available now. Welcome to Hell 🌹",
+              "entities": {
+                "description": {},
+                "url": {
+                  "urls": [
+                    {
+                      "display_url": "diablo4.blizzard.com/en-us/",
+                      "expanded_url": "http://diablo4.blizzard.com/en-us/",
+                      "indices": [
+                        0,
+                        23
+                      ],
+                      "url": "https://t.co/Y1E8JQGpu1"
+                    }
+                  ]
+                }
+              },
+              "fast_followers_count": 0,
+              "favourites_count": 12305,
+              "follow_request_sent": false,
+              "followers_count": 953420,
+              "friends_count": 57,
+              "has_custom_timelines": true,
+              "is_translator": false,
+              "listed_count": 5832,
+              "media_count": 5054,
+              "needs_phone_verification": false,
+              "normal_followers_count": 953420,
+              "notifications": false,
+              "pinned_tweet_ids_str": [
+                "2098839686311460973"
+              ],
+              "possibly_sensitive": false,
+              "profile_banner_url": "https://pbs.twimg.com/profile_banners/61040833/1789317037",
+              "profile_interstitial_type": "",
+              "statuses_count": 37868,
+              "time_zone": "",
+              "translator_type": "none",
+              "url": "https://t.co/Y1E8JQGpu1",
+              "utc_offset": 0,
+              "withheld_description": "",
+              "withheld_scope": ""
+            },
+            "location": {
+              "location": "Fractured Peaks, Sanctuary"
+            },
+            "media_permissions": {
+              "can_media_tag": false
+            },
+            "parody_commentary_fan_label": "None",
+            "privacy": {
+              "protected": false
+            },
+            "profile_bio": {
+              "description": "ESRB Rating: MATURE with Blood and Gore, Intense Violence, Language. #DiabloIV is available now. Welcome to Hell 🌹"
+            },
+            "profile_description_language": "en",
+            "profile_image_shape": "Square",
+            "relationship_perspectives": {
+              "blocked_by": false,
+              "blocking": false,
+              "followed_by": false,
+              "following": false,
+              "muting": false
+            },
+            "rest_id": "61040833",
+            "super_follow_eligible": false,
+            "super_followed_by": false,
+            "super_following": false,
+            "verification": {
+              "verified": false,
+              "verified_type": "Business"
+            }
+          }
+        }
+      },
+      "edit_control": {
+        "edit_tweet_ids": [
+          "2098922541293191227"
+        ],
+        "editable_until_msecs": "1789260704000",
+        "edits_remaining": "5",
+        "is_edit_eligible": true
+      },
+      "grok_analysis_button": true,
+      "is_translatable": false,
+      "legacy": {
+        "bookmark_count": 126,
+        "bookmarked": false,
+        "conversation_id_str": "2098922541293191227",
+        "created_at": "Sat Sep 12 23:51:44 +0000 2026",
+        "display_text_range": [
+          0,
+          97
+        ],
+        "entities": {
+          "media": [
+            {
+              "display_url": "pic.x.com/jKqeVtg9A0",
+              "expanded_url": "https://x.com/Diablo/status/2098922541293191227/photo/1",
+              "ext_alt_text": "Image: From left to right, Diablo from D1, The Dark Wanderer, Mephisto, Diablo from Diablo Immortal, and Malthael. Gold text reads “130 Millions Players”",
+              "ext_media_availability": {
+                "status": "Available"
+              },
+              "features": {
+                "large": {
+                  "faces": [
+                    {
+                      "h": 193,
+                      "w": 193,
+                      "x": 235,
+                      "y": 316
+                    }
+                  ]
+                },
+                "medium": {
+                  "faces": [
+                    {
+                      "h": 171,
+                      "w": 171,
+                      "x": 208,
+                      "y": 280
+                    }
+                  ]
+                },
+                "orig": {
+                  "faces": [
+                    {
+                      "h": 193,
+                      "w": 193,
+                      "x": 235,
+                      "y": 316
+                    }
+                  ]
+                },
+                "small": {
+                  "faces": [
+                    {
+                      "h": 97,
+                      "w": 97,
+                      "x": 118,
+                      "y": 159
+                    }
+                  ]
+                }
+              },
+              "id_str": "2098922537082032131",
+              "indices": [
+                98,
+                121
+              ],
+              "media_key": "3_2098922537082032131",
+              "media_results": {
+                "result": {
+                  "media_key": "3_2098922537082032131"
+                }
+              },
+              "media_url_https": "https://pbs.twimg.com/media/HSDe7UnWEAM1i5-.jpg",
+              "original_info": {
+                "focus_rects": [
+                  {
+                    "h": 605,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "h": 1080,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "h": 1231,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "h": 1350,
+                    "w": 675,
+                    "x": 405,
+                    "y": 0
+                  },
+                  {
+                    "h": 1350,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  }
+                ],
+                "height": 1350,
+                "width": 1080
+              },
+              "sizes": {
+                "large": {
+                  "h": 1350,
+                  "resize": "fit",
+                  "w": 1080
+                },
+                "medium": {
+                  "h": 1200,
+                  "resize": "fit",
+                  "w": 960
+                },
+                "small": {
+                  "h": 680,
+                  "resize": "fit",
+                  "w": 544
+                },
+                "thumb": {
+                  "h": 150,
+                  "resize": "crop",
+                  "w": 150
+                }
+              },
+              "type": "photo",
+              "url": "https://t.co/jKqeVtg9A0"
+            }
+          ]
+        },
+        "extended_entities": {
+          "media": [
+            {
+              "display_url": "pic.x.com/jKqeVtg9A0",
+              "expanded_url": "https://x.com/Diablo/status/2098922541293191227/photo/1",
+              "ext_alt_text": "Image: From left to right, Diablo from D1, The Dark Wanderer, Mephisto, Diablo from Diablo Immortal, and Malthael. Gold text reads “130 Millions Players”",
+              "ext_media_availability": {
+                "status": "Available"
+              },
+              "features": {
+                "large": {
+                  "faces": [
+                    {
+                      "h": 193,
+                      "w": 193,
+                      "x": 235,
+                      "y": 316
+                    }
+                  ]
+                },
+                "medium": {
+                  "faces": [
+                    {
+                      "h": 171,
+                      "w": 171,
+                      "x": 208,
+                      "y": 280
+                    }
+                  ]
+                },
+                "orig": {
+                  "faces": [
+                    {
+                      "h": 193,
+                      "w": 193,
+                      "x": 235,
+                      "y": 316
+                    }
+                  ]
+                },
+                "small": {
+                  "faces": [
+                    {
+                      "h": 97,
+                      "w": 97,
+                      "x": 118,
+                      "y": 159
+                    }
+                  ]
+                }
+              },
+              "id_str": "2098922537082032131",
+              "indices": [
+                98,
+                121
+              ],
+              "media_key": "3_2098922537082032131",
+              "media_results": {
+                "result": {
+                  "media_key": "3_2098922537082032131"
+                }
+              },
+              "media_url_https": "https://pbs.twimg.com/media/HSDe7UnWEAM1i5-.jpg",
+              "original_info": {
+                "focus_rects": [
+                  {
+                    "h": 605,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "h": 1080,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "h": 1231,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "h": 1350,
+                    "w": 675,
+                    "x": 405,
+                    "y": 0
+                  },
+                  {
+                    "h": 1350,
+                    "w": 1080,
+                    "x": 0,
+                    "y": 0
+                  }
+                ],
+                "height": 1350,
+                "width": 1080
+              },
+              "sizes": {
+                "large": {
+                  "h": 1350,
+                  "resize": "fit",
+                  "w": 1080
+                },
+                "medium": {
+                  "h": 1200,
+                  "resize": "fit",
+                  "w": 960
+                },
+                "small": {
+                  "h": 680,
+                  "resize": "fit",
+                  "w": 544
+                },
+                "thumb": {
+                  "h": 150,
+                  "resize": "crop",
+                  "w": 150
+                }
+              },
+              "type": "photo",
+              "url": "https://t.co/jKqeVtg9A0"
+            }
+          ]
+        },
+        "favorite_count": 3982,
+        "favorited": false,
+        "full_text": "130 million players. One Sanctuary. An endless fight against Hell. 🔥🖤🔥\n\nThank you for joining us. https://t.co/jKqeVtg9A0",
+        "id_str": "2098922541293191227",
+        "is_quote_status": false,
+        "lang": "en",
+        "possibly_sensitive": false,
+        "possibly_sensitive_editable": true,
+        "quote_count": 41,
+        "reply_count": 143,
+        "retweet_count": 316,
+        "retweeted": false,
+        "user_id_str": "61040833"
+      },
+      "rest_id": "2098922541293191227",
+      "source": "<a href=\"https://prod1.sprinklr.com\" rel=\"nofollow\">Sprinklr Publishing</a>",
+      "unmention_data": {},
+      "views": {
+        "count": "4177067",
+        "state": "EnabledWithCount"
+      }
+    }
+  },
+  "rest_id": "2099051728318660621",
+  "source": "<a href=\"http://twitter.com/download/iphone\" rel=\"nofollow\">Twitter for iPhone</a>",
+  "unmention_data": {},
+  "views": {
+    "count": "4376456",
+    "state": "EnabledWithCount"
+  }
+}

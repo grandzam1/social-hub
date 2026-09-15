@@ -1,0 +1,550 @@
+{
+  "success": true,
+  "credits_remaining": 93,
+  "credits_charged": 1,
+  "__typename": "Tweet",
+  "card": {
+    "rest_id": "https://t.co/Tgc6Q7rABA"
+  },
+  "core": {
+    "user_results": {
+      "result": {
+        "__typename": "User",
+        "affiliates_highlighted_label": {
+          "label": {
+            "badge": {
+              "url": "https://pbs.twimg.com/profile_images/1955359038532653056/OSHY3ewP_bigger.jpg"
+            },
+            "description": "X",
+            "url": {
+              "url": "https://twitter.com/X",
+              "urlType": "DeepLink"
+            },
+            "userLabelDisplayType": "Badge",
+            "userLabelType": "BusinessLabel"
+          }
+        },
+        "avatar": {
+          "image_url": "https://pbs.twimg.com/profile_images/2053244804520427520/m8mdWZCG_normal.jpg"
+        },
+        "core": {
+          "created_at": "Tue Jun 02 20:12:29 +0000 2009",
+          "name": "Elon Musk",
+          "screen_name": "elonmusk"
+        },
+        "dm_permissions": {
+          "can_dm": false
+        },
+        "follow_request_sent": false,
+        "has_graduated_access": true,
+        "id": "VXNlcjo0NDE5NjM5Nw==",
+        "is_blue_verified": true,
+        "legacy": {
+          "default_profile": false,
+          "default_profile_image": false,
+          "description": "https://t.co/ZdBx5WABYx",
+          "entities": {
+            "description": {
+              "urls": [
+                {
+                  "display_url": "Terafab.AI",
+                  "expanded_url": "http://Terafab.AI",
+                  "indices": [
+                    0,
+                    23
+                  ],
+                  "url": "https://t.co/ZdBx5WABYx"
+                }
+              ]
+            }
+          },
+          "fast_followers_count": 0,
+          "favourites_count": 247861,
+          "follow_request_sent": false,
+          "followers_count": 241660505,
+          "friends_count": 1406,
+          "has_custom_timelines": true,
+          "is_translator": false,
+          "listed_count": 170525,
+          "media_count": 4717,
+          "needs_phone_verification": false,
+          "normal_followers_count": 241660505,
+          "notifications": false,
+          "pinned_tweet_ids_str": [
+            "2098932438055469451"
+          ],
+          "possibly_sensitive": false,
+          "profile_banner_url": "https://pbs.twimg.com/profile_banners/44196397/1774145451",
+          "profile_interstitial_type": "",
+          "statuses_count": 108484,
+          "time_zone": "",
+          "translator_type": "none",
+          "url": "",
+          "utc_offset": 0,
+          "withheld_description": "",
+          "withheld_scope": ""
+        },
+        "location": {
+          "location": ""
+        },
+        "media_permissions": {
+          "can_media_tag": false
+        },
+        "parody_commentary_fan_label": "None",
+        "privacy": {
+          "protected": false
+        },
+        "professional": {
+          "category": [],
+          "professional_type": "Creator",
+          "rest_id": "1679729435447275522"
+        },
+        "profile_bio": {
+          "description": "https://t.co/ZdBx5WABYx"
+        },
+        "profile_image_shape": "Circle",
+        "relationship_perspectives": {
+          "blocked_by": false,
+          "blocking": false,
+          "followed_by": false,
+          "following": false,
+          "muting": false
+        },
+        "rest_id": "44196397",
+        "super_follow_eligible": false,
+        "super_followed_by": false,
+        "super_following": false,
+        "verification": {
+          "verified": false
+        }
+      }
+    }
+  },
+  "edit_control": {
+    "edit_tweet_ids": [
+      "2088037519312994480"
+    ],
+    "editable_until_msecs": "1786665513000",
+    "edits_remaining": "5",
+    "is_edit_eligible": true
+  },
+  "grok_analysis_button": true,
+  "grok_annotations": {
+    "is_image_editable_by_grok": true
+  },
+  "is_translatable": false,
+  "legacy": {
+    "bookmark_count": 1762,
+    "bookmarked": false,
+    "conversation_id_str": "2088037519312994480",
+    "created_at": "Thu Aug 13 22:58:33 +0000 2026",
+    "display_text_range": [
+      0,
+      53
+    ],
+    "entities": {
+      "media": [
+        {
+          "additional_media_info": {
+            "monetizable": false,
+            "source_user": {
+              "user_results": {
+                "result": {
+                  "__typename": "User",
+                  "affiliates_highlighted_label": {},
+                  "avatar": {
+                    "image_url": "https://pbs.twimg.com/profile_images/2089050162710929408/Xy5O8i3g_normal.jpg"
+                  },
+                  "core": {
+                    "created_at": "Sun Jul 08 20:42:31 +0000 2018",
+                    "name": "Tesla Owners Silicon Valley",
+                    "screen_name": "teslaownersSV"
+                  },
+                  "dm_permissions": {
+                    "can_dm": false
+                  },
+                  "follow_request_sent": false,
+                  "has_graduated_access": true,
+                  "id": "VXNlcjoxMDE2MDU5OTgxOTA3Mzg2MzY4",
+                  "is_blue_verified": false,
+                  "legacy": {
+                    "default_profile": false,
+                    "default_profile_image": false,
+                    "description": "The most notorious Tesla Club in the world. Creator of @thextakeover and taking the Takeover global. \n2.9M followers across all channels",
+                    "entities": {
+                      "description": {},
+                      "url": {
+                        "urls": [
+                          {
+                            "display_url": "linktr.ee/Teslaownerssv",
+                            "expanded_url": "https://linktr.ee/Teslaownerssv",
+                            "indices": [
+                              0,
+                              23
+                            ],
+                            "url": "https://t.co/jL2WrOcbB1"
+                          }
+                        ]
+                      }
+                    },
+                    "fast_followers_count": 0,
+                    "favourites_count": 202171,
+                    "follow_request_sent": false,
+                    "followers_count": 1443207,
+                    "friends_count": 867,
+                    "has_custom_timelines": true,
+                    "is_translator": false,
+                    "listed_count": 3616,
+                    "media_count": 74069,
+                    "needs_phone_verification": false,
+                    "normal_followers_count": 1443207,
+                    "notifications": false,
+                    "pinned_tweet_ids_str": [
+                      "2098758531663179834"
+                    ],
+                    "possibly_sensitive": false,
+                    "profile_banner_url": "https://pbs.twimg.com/profile_banners/1016059981907386368/1767375574",
+                    "profile_interstitial_type": "",
+                    "statuses_count": 215038,
+                    "time_zone": "",
+                    "translator_type": "none",
+                    "url": "https://t.co/jL2WrOcbB1",
+                    "utc_offset": 0,
+                    "withheld_description": "",
+                    "withheld_scope": ""
+                  },
+                  "location": {
+                    "location": "Silicon Valley"
+                  },
+                  "media_permissions": {
+                    "can_media_tag": false
+                  },
+                  "parody_commentary_fan_label": "None",
+                  "privacy": {
+                    "protected": false
+                  },
+                  "professional": {
+                    "category": [],
+                    "professional_type": "Creator",
+                    "rest_id": "1644547182144667650"
+                  },
+                  "profile_bio": {
+                    "description": "The most notorious Tesla Club in the world. Creator of @thextakeover and taking the Takeover global. \n2.9M followers across all channels"
+                  },
+                  "profile_description_language": "en",
+                  "profile_image_shape": "Square",
+                  "relationship_perspectives": {
+                    "blocked_by": false,
+                    "blocking": false,
+                    "followed_by": false,
+                    "following": false,
+                    "muting": false
+                  },
+                  "rest_id": "1016059981907386368",
+                  "super_follow_eligible": false,
+                  "super_followed_by": false,
+                  "super_following": false,
+                  "verification": {
+                    "verified": false,
+                    "verified_type": "Business"
+                  }
+                }
+              }
+            }
+          },
+          "allow_download_status": {
+            "allow_download": true
+          },
+          "display_url": "pic.x.com/Tgc6Q7rABA",
+          "expanded_url": "https://x.com/teslaownersSV/status/2087768901845451006/video/1",
+          "ext_media_availability": {
+            "status": "Available"
+          },
+          "id_str": "2087768851408945152",
+          "indices": [
+            30,
+            53
+          ],
+          "media_key": "13_2087768851408945152",
+          "media_results": {
+            "result": {
+              "media_key": "13_2087768851408945152"
+            }
+          },
+          "media_url_https": "https://pbs.twimg.com/amplify_video_thumb/2087768851408945152/img/aJxYJZHh2z_UWK2h.jpg",
+          "original_info": {
+            "focus_rects": [],
+            "height": 1280,
+            "width": 720
+          },
+          "sizes": {
+            "large": {
+              "h": 1280,
+              "resize": "fit",
+              "w": 720
+            },
+            "medium": {
+              "h": 1200,
+              "resize": "fit",
+              "w": 675
+            },
+            "small": {
+              "h": 680,
+              "resize": "fit",
+              "w": 383
+            },
+            "thumb": {
+              "h": 150,
+              "resize": "crop",
+              "w": 150
+            }
+          },
+          "source_status_id_str": "2087768901845451006",
+          "source_user_id_str": "1016059981907386368",
+          "type": "video",
+          "url": "https://t.co/Tgc6Q7rABA",
+          "video_info": {
+            "aspect_ratio": [
+              9,
+              16
+            ],
+            "duration_millis": 40866,
+            "variants": [
+              {
+                "content_type": "application/x-mpegURL",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/pl/NKj-ndEOyV2lxS-y.m3u8?tag=29&v=c40"
+              },
+              {
+                "bitrate": 632000,
+                "content_type": "video/mp4",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/vid/avc1/320x568/R2mHcZc2JM_bi3nE.mp4?tag=29"
+              },
+              {
+                "bitrate": 950000,
+                "content_type": "video/mp4",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/vid/avc1/480x852/GTP6PvDKr1kBFjAN.mp4?tag=29"
+              },
+              {
+                "bitrate": 2176000,
+                "content_type": "video/mp4",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/vid/avc1/720x1280/ZBJ4AovckJldvnIW.mp4?tag=29"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "extended_entities": {
+      "media": [
+        {
+          "additional_media_info": {
+            "monetizable": false,
+            "source_user": {
+              "user_results": {
+                "result": {
+                  "__typename": "User",
+                  "affiliates_highlighted_label": {},
+                  "avatar": {
+                    "image_url": "https://pbs.twimg.com/profile_images/2089050162710929408/Xy5O8i3g_normal.jpg"
+                  },
+                  "core": {
+                    "created_at": "Sun Jul 08 20:42:31 +0000 2018",
+                    "name": "Tesla Owners Silicon Valley",
+                    "screen_name": "teslaownersSV"
+                  },
+                  "dm_permissions": {
+                    "can_dm": false
+                  },
+                  "follow_request_sent": false,
+                  "has_graduated_access": true,
+                  "id": "VXNlcjoxMDE2MDU5OTgxOTA3Mzg2MzY4",
+                  "is_blue_verified": false,
+                  "legacy": {
+                    "default_profile": false,
+                    "default_profile_image": false,
+                    "description": "The most notorious Tesla Club in the world. Creator of @thextakeover and taking the Takeover global. \n2.9M followers across all channels",
+                    "entities": {
+                      "description": {},
+                      "url": {
+                        "urls": [
+                          {
+                            "display_url": "linktr.ee/Teslaownerssv",
+                            "expanded_url": "https://linktr.ee/Teslaownerssv",
+                            "indices": [
+                              0,
+                              23
+                            ],
+                            "url": "https://t.co/jL2WrOcbB1"
+                          }
+                        ]
+                      }
+                    },
+                    "fast_followers_count": 0,
+                    "favourites_count": 202171,
+                    "follow_request_sent": false,
+                    "followers_count": 1443207,
+                    "friends_count": 867,
+                    "has_custom_timelines": true,
+                    "is_translator": false,
+                    "listed_count": 3616,
+                    "media_count": 74069,
+                    "needs_phone_verification": false,
+                    "normal_followers_count": 1443207,
+                    "notifications": false,
+                    "pinned_tweet_ids_str": [
+                      "2098758531663179834"
+                    ],
+                    "possibly_sensitive": false,
+                    "profile_banner_url": "https://pbs.twimg.com/profile_banners/1016059981907386368/1767375574",
+                    "profile_interstitial_type": "",
+                    "statuses_count": 215038,
+                    "time_zone": "",
+                    "translator_type": "none",
+                    "url": "https://t.co/jL2WrOcbB1",
+                    "utc_offset": 0,
+                    "withheld_description": "",
+                    "withheld_scope": ""
+                  },
+                  "location": {
+                    "location": "Silicon Valley"
+                  },
+                  "media_permissions": {
+                    "can_media_tag": false
+                  },
+                  "parody_commentary_fan_label": "None",
+                  "privacy": {
+                    "protected": false
+                  },
+                  "professional": {
+                    "category": [],
+                    "professional_type": "Creator",
+                    "rest_id": "1644547182144667650"
+                  },
+                  "profile_bio": {
+                    "description": "The most notorious Tesla Club in the world. Creator of @thextakeover and taking the Takeover global. \n2.9M followers across all channels"
+                  },
+                  "profile_description_language": "en",
+                  "profile_image_shape": "Square",
+                  "relationship_perspectives": {
+                    "blocked_by": false,
+                    "blocking": false,
+                    "followed_by": false,
+                    "following": false,
+                    "muting": false
+                  },
+                  "rest_id": "1016059981907386368",
+                  "super_follow_eligible": false,
+                  "super_followed_by": false,
+                  "super_following": false,
+                  "verification": {
+                    "verified": false,
+                    "verified_type": "Business"
+                  }
+                }
+              }
+            }
+          },
+          "allow_download_status": {
+            "allow_download": true
+          },
+          "display_url": "pic.x.com/Tgc6Q7rABA",
+          "expanded_url": "https://x.com/teslaownersSV/status/2087768901845451006/video/1",
+          "ext_media_availability": {
+            "status": "Available"
+          },
+          "id_str": "2087768851408945152",
+          "indices": [
+            30,
+            53
+          ],
+          "media_key": "13_2087768851408945152",
+          "media_results": {
+            "result": {
+              "media_key": "13_2087768851408945152"
+            }
+          },
+          "media_url_https": "https://pbs.twimg.com/amplify_video_thumb/2087768851408945152/img/aJxYJZHh2z_UWK2h.jpg",
+          "original_info": {
+            "focus_rects": [],
+            "height": 1280,
+            "width": 720
+          },
+          "sizes": {
+            "large": {
+              "h": 1280,
+              "resize": "fit",
+              "w": 720
+            },
+            "medium": {
+              "h": 1200,
+              "resize": "fit",
+              "w": 675
+            },
+            "small": {
+              "h": 680,
+              "resize": "fit",
+              "w": 383
+            },
+            "thumb": {
+              "h": 150,
+              "resize": "crop",
+              "w": 150
+            }
+          },
+          "source_status_id_str": "2087768901845451006",
+          "source_user_id_str": "1016059981907386368",
+          "type": "video",
+          "url": "https://t.co/Tgc6Q7rABA",
+          "video_info": {
+            "aspect_ratio": [
+              9,
+              16
+            ],
+            "duration_millis": 40866,
+            "variants": [
+              {
+                "content_type": "application/x-mpegURL",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/pl/NKj-ndEOyV2lxS-y.m3u8?tag=29&v=c40"
+              },
+              {
+                "bitrate": 632000,
+                "content_type": "video/mp4",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/vid/avc1/320x568/R2mHcZc2JM_bi3nE.mp4?tag=29"
+              },
+              {
+                "bitrate": 950000,
+                "content_type": "video/mp4",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/vid/avc1/480x852/GTP6PvDKr1kBFjAN.mp4?tag=29"
+              },
+              {
+                "bitrate": 2176000,
+                "content_type": "video/mp4",
+                "url": "https://video.twimg.com/amplify_video/2087768851408945152/vid/avc1/720x1280/ZBJ4AovckJldvnIW.mp4?tag=29"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "favorite_count": 27342,
+    "favorited": false,
+    "full_text": "Tesla self-driving is amazing https://t.co/Tgc6Q7rABA",
+    "id_str": "2088037519312994480",
+    "is_quote_status": false,
+    "lang": "en",
+    "possibly_sensitive": false,
+    "possibly_sensitive_editable": true,
+    "quote_count": 351,
+    "reply_count": 2786,
+    "retweet_count": 3012,
+    "retweeted": false,
+    "user_id_str": "44196397"
+  },
+  "rest_id": "2088037519312994480",
+  "source": "<a href=\"http://twitter.com/download/iphone\" rel=\"nofollow\">Twitter for iPhone</a>",
+  "unmention_data": {},
+  "views": {
+    "count": "7029945",
+    "state": "EnabledWithCount"
+  }
+}
