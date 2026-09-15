@@ -10,6 +10,10 @@
     "install:api": "npm install --prefix apps/api",
     "sc": "node scripts/sc.mjs",
     "sc:offline": "SC_MODE=offline node scripts/sc.mjs",
-    "sc:fixtures": "node scripts/sc.mjs fixture list"
+    "sc:fixtures": "node scripts/sc.mjs fixture list",
+    "cf:check": "node scripts/cf-check.mjs",
+    "cf:login": "npm run cf:login --prefix apps/api",
+    "cf:dry": "npm run cf:dry --prefix apps/api",
+    "cf:deploy": "npm run cf:deploy --prefix apps/api"
   }
 }

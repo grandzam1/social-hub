@@ -5,21 +5,17 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Disk cache for ScrapeCreators responses.
- * Modes (SC_MODE):
- *   cache   — read disk first; on miss call API and save (default for local)
- *   offline — disk/fixtures only; never call ScrapeCreators
- *   live    — always call API (still writes cache unless SC_CACHE_WRITE=0)
+ * On Cloudflare Workers: always live (no disk) — never call fileURLToPath at module load.
  */
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-/** social-hub root (apps/api/src/lib → ../../../../) */
-export const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
-export const CACHE_DIR = join(REPO_ROOT, ".cache", "scrapecreators");
-export const FIXTURES_DIR = join(REPO_ROOT, "fixtures", "scrapecreators");
 
 export type ScMode = "cache" | "offline" | "live";
 
+function isCloudflare(): boolean {
+  return process.env.RUNTIME === "cloudflare";
+}
+
 export function scMode(): ScMode {
+  if (isCloudflare()) return "live";
   const raw = (process.env.SC_MODE || "cache").toLowerCase().trim();
   if (raw === "offline" || raw === "fixture" || raw === "fixtures") return "offline";
   if (raw === "live" || raw === "nocache") return "live";
@@ -31,12 +27,22 @@ export function cacheKey(path: string, params: Record<string, string>): string {
     .sort()
     .map((k) => `${k}=${params[k]}`)
     .join("&");
-  const raw = `${path}?${sorted}`;
-  return createHash("sha256").update(raw).digest("hex").slice(0, 24);
+  return createHash("sha256").update(`${path}?${sorted}`).digest("hex").slice(0, 24);
 }
 
-function cachePath(key: string): string {
-  return join(CACHE_DIR, `${key}.json`);
+function diskRoots(): { cache: string; fixtures: string } | null {
+  if (isCloudflare()) return null;
+  try {
+    const url = import.meta.url;
+    if (!url) return null;
+    const root = join(dirname(fileURLToPath(url)), "..", "..", "..", "..");
+    return {
+      cache: join(root, ".cache", "scrapecreators"),
+      fixtures: join(root, "fixtures", "scrapecreators"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function ensureDir(dir: string) {
@@ -50,13 +56,14 @@ export type CacheHit = {
   path: string;
 };
 
-/** Try disk cache, then fixtures/<key>.json or fixtures by alias. */
 export function readCached(
   path: string,
   params: Record<string, string>,
 ): CacheHit | null {
+  const roots = diskRoots();
+  if (!roots) return null;
   const key = cacheKey(path, params);
-  const disk = cachePath(key);
+  const disk = join(roots.cache, `${key}.json`);
   if (existsSync(disk)) {
     return {
       body: JSON.parse(readFileSync(disk, "utf8")),
@@ -66,7 +73,7 @@ export function readCached(
     };
   }
 
-  const fixtureByKey = join(FIXTURES_DIR, `${key}.json`);
+  const fixtureByKey = join(roots.fixtures, `${key}.json`);
   if (existsSync(fixtureByKey)) {
     return {
       body: JSON.parse(readFileSync(fixtureByKey, "utf8")),
@@ -76,12 +83,12 @@ export function readCached(
     };
   }
 
-  // Named fixture override: SC_FIXTURE=tesla-x-feed.json
   const named = process.env.SC_FIXTURE?.trim();
   if (named) {
-    const p = named.includes("/") || named.includes("\\")
-      ? named
-      : join(FIXTURES_DIR, named);
+    const p =
+      named.includes("/") || named.includes("\\")
+        ? named
+        : join(roots.fixtures, named);
     if (existsSync(p)) {
       return {
         body: JSON.parse(readFileSync(p, "utf8")),
@@ -100,23 +107,19 @@ export function writeCached(
   params: Record<string, string>,
   body: unknown,
 ): string {
-  if (process.env.SC_CACHE_WRITE === "0") return "";
-  ensureDir(CACHE_DIR);
+  if (process.env.SC_CACHE_WRITE === "0" || isCloudflare()) return "";
+  const roots = diskRoots();
+  if (!roots) return "";
+  ensureDir(roots.cache);
   const key = cacheKey(path, params);
-  const disk = cachePath(key);
-  const meta = {
-    _cachedAt: new Date().toISOString(),
-    _path: path,
-    _params: params,
-    data: body,
-  };
-  // Store raw API body at top level for drop-in use; meta alongside
+  const disk = join(roots.cache, `${key}.json`);
+  const at = new Date().toISOString();
   writeFileSync(
     disk,
     JSON.stringify(
       typeof body === "object" && body !== null && !Array.isArray(body)
-        ? { ...(body as object), __scCache: { at: meta._cachedAt, path, params } }
-        : { __scPayload: body, __scCache: { at: meta._cachedAt, path, params } },
+        ? { ...(body as object), __scCache: { at, path, params } }
+        : { __scPayload: body, __scCache: { at, path, params } },
       null,
       2,
     ),
@@ -124,7 +127,6 @@ export function writeCached(
   return disk;
 }
 
-/** Strip cache metadata before handing to normalizers. */
 export function stripCacheMeta(body: unknown): unknown {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const o = { ...(body as Record<string, unknown>) };
@@ -133,17 +135,18 @@ export function stripCacheMeta(body: unknown): unknown {
   return o;
 }
 
-/** Promote a cache file into fixtures/ for permanent reuse (0 API cost forever). */
 export function promoteToFixture(
   path: string,
   params: Record<string, string>,
   alias: string,
 ): string {
+  const roots = diskRoots();
+  if (!roots) throw new Error("No disk available (Cloudflare runtime)");
   const hit = readCached(path, params);
   if (!hit) throw new Error(`Nothing cached for ${path}`);
-  ensureDir(FIXTURES_DIR);
+  ensureDir(roots.fixtures);
   const name = alias.endsWith(".json") ? alias : `${alias}.json`;
-  const dest = join(FIXTURES_DIR, name);
+  const dest = join(roots.fixtures, name);
   writeFileSync(dest, JSON.stringify(stripCacheMeta(hit.body), null, 2));
   return dest;
 }

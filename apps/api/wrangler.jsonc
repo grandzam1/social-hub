@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "social-hub",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "vars": {
+    "RUNTIME": "cloudflare",
+    "SC_MODE": "live",
+    "SC_CACHE_WRITE": "0",
+    "INNGEST_DEV": "0",
+    "AIRTABLE_BASE_ID": "appkPrLfwDGwIIbTL",
+    "AIRTABLE_POSTS_TABLE": "tblxevZB9wCX1N3WF",
+    "AIRTABLE_MEDIA_TABLE": "tbly36b1qJiRbfEL2",
+    "AIRTABLE_PROFILES_TABLE": "tblD49NYtqd3vdOTI",
+    "R2_BUCKET": "scrape-kit-media"
+  }
+}

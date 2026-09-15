@@ -1,0 +1,506 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readFileSync, existsSync } from "node:fs";
+import { Hono } from "hono";
+import { serve as serveInngest } from "inngest/hono";
+import { inngest } from "./inngest/client.js";
+import { functions } from "./inngest/functions.js";
+import { saveMediaCdnToR2 } from "./lib/save-media.js";
+import { scrapePostPipeline } from "./lib/scrape-post.js";
+import { listScraps } from "./lib/scraps.js";
+import { listRecentPosts } from "./lib/recent-posts.js";
+import { getCreditBalance, getCreditUsage } from "./lib/scrapecreators.js";
+
+export type WorkerBindings = {
+  ASSETS?: Fetcher;
+  [key: string]: unknown;
+};
+
+export type AppEnv = { Bindings: WorkerBindings };
+
+function getPublicDir(): string | null {
+  if (process.env.RUNTIME === "cloudflare") return null;
+  try {
+    return resolve(fileURLToPath(new URL(".", import.meta.url)), "../public");
+  } catch {
+    return null;
+  }
+}
+
+export function createApp() {
+  const app = new Hono<AppEnv>();
+  const publicDir = getPublicDir();
+
+app.get("/health", (c) =>
+  c.json({
+    ok: true,
+    service: "social-hub-api",
+    inngestDev: process.env.INNGEST_DEV === "1",
+    hasEventKey: Boolean(process.env.INNGEST_EVENT_KEY),
+    hasSigningKey: Boolean(process.env.INNGEST_SIGNING_KEY),
+    hasAirtable: Boolean(
+      process.env.AIRTABLE_TOKEN || process.env.AIRTABLE_API_KEY,
+    ),
+    hasR2: Boolean(
+      process.env.R2_ACCOUNT_ID &&
+        process.env.R2_ACCESS_KEY_ID &&
+        process.env.R2_SECRET_ACCESS_KEY,
+    ),
+    hasScrapeCreators: Boolean(process.env.SCRAPECREATORS_API_KEY),
+  }),
+);
+
+app.on(
+  ["GET", "PUT", "POST"],
+  "/api/inngest",
+  serveInngest({ client: inngest, functions }),
+);
+
+app.post("/demo/hello", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({} as { who?: string }));
+    const ids = await inngest.send({
+      name: "social/hello",
+      data: { who: body.who ?? "WSL", at: new Date().toISOString() },
+    });
+    return c.json({ ok: true, ids });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[demo/hello]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+type SaveMediaBody = {
+  mediaRecordId?: string;
+  postRecordId?: string;
+  fileUrl?: string;
+  objectKey?: string;
+  mediaType?: string;
+  force?: boolean;
+};
+
+/** Async queue (needs Inngest Dev or Cloud). */
+app.post("/api/media/save", async (c) => {
+  try {
+    const body = (await c.req.json()) as SaveMediaBody;
+    if (!body?.mediaRecordId) {
+      return c.json({ ok: false, error: "mediaRecordId required" }, 400);
+    }
+    const ids = await inngest.send({
+      name: "media/cdn.ready",
+      data: {
+        mediaRecordId: body.mediaRecordId,
+        postRecordId: body.postRecordId,
+        fileUrl: body.fileUrl,
+        objectKey: body.objectKey,
+        mediaType: body.mediaType,
+        force: Boolean(body.force),
+      },
+    });
+    return c.json({
+      ok: true,
+      mode: "async",
+      event: "media/cdn.ready",
+      ids,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/media/save]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/**
+ * Standalone sync — no Inngest required.
+ * Runs download → R2 → Airtable in this request.
+ */
+app.post("/api/media/save-sync", async (c) => {
+  try {
+    const body = (await c.req.json()) as SaveMediaBody;
+    if (!body?.mediaRecordId) {
+      return c.json({ ok: false, error: "mediaRecordId required" }, 400);
+    }
+    const result = await saveMediaCdnToR2({
+      mediaRecordId: body.mediaRecordId,
+      postRecordId: body.postRecordId,
+      fileUrl: body.fileUrl,
+      objectKey: body.objectKey,
+      mediaType: body.mediaType,
+      force: Boolean(body.force),
+    });
+    return c.json({ ok: true, mode: "sync", result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/media/save-sync]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/**
+ * Paste a post URL → ScrapeCreators → Airtable → optional R2.
+ */
+app.post("/api/scrape-post", async (c) => {
+  try {
+    const body = (await c.req.json()) as {
+      url?: string;
+      saveToR2?: boolean;
+      saveMode?: "sync" | "async";
+      force?: boolean;
+    };
+    if (!body?.url) {
+      return c.json({ ok: false, error: "url required" }, 400);
+    }
+    const result = await scrapePostPipeline({
+      url: body.url,
+      saveToR2: body.saveToR2,
+      saveMode: body.saveMode,
+      force: body.force,
+    });
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/scrape-post]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/** ScrapeCreators credit balance + recent charge history. */
+app.get("/api/credits", async (c) => {
+  try {
+    const remaining = await getCreditBalance();
+    return c.json({ ok: true, remaining });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/credits]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+app.get("/api/credits/history", async (c) => {
+  try {
+    const page = Number(c.req.query("page") || "1") || 1;
+    const [remaining, history] = await Promise.all([
+      getCreditBalance(),
+      getCreditUsage(page),
+    ]);
+    return c.json({ ok: true, remaining, page, history });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/credits/history]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/** List recent posts for a handle — fetch only, no R2 / Airtable. */
+app.get("/api/recent-posts", async (c) => {
+  try {
+    const platform = (c.req.query("platform") || "").toLowerCase();
+    const handle = c.req.query("handle") || "";
+    const limit = Number(c.req.query("limit") || "24") || 24;
+    const cursor = c.req.query("cursor") || undefined;
+    const filter = c.req.query("filter") || "media";
+    if (!["x", "instagram", "tiktok"].includes(platform)) {
+      return c.json(
+        { ok: false, error: "platform must be x, instagram, or tiktok" },
+        400,
+      );
+    }
+    if (!handle.trim()) {
+      return c.json({ ok: false, error: "handle required" }, 400);
+    }
+    const result = await listRecentPosts({
+      platform: platform as "x" | "instagram" | "tiktok",
+      handle,
+      limit,
+      cursor,
+      filter,
+    });
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/recent-posts]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/** Proxy CDN thumbnails so browser privacy blockers don't blank the feed. */
+/** TikTok often serves .heic covers — browsers can't paint those in <img>. */
+function thumbCandidateUrls(raw: string): string[] {
+  const out: string[] = [];
+  const push = (u: string) => {
+    if (u && !out.includes(u)) out.push(u);
+  };
+  push(raw);
+  const lower = raw.toLowerCase();
+  if (lower.includes(".heic")) {
+    push(raw.replace(/\.heic\b/gi, ".jpeg"));
+    push(raw.replace(/\.heic\b/gi, ".jpg"));
+    push(raw.replace(/\.heic\b/gi, ".webp"));
+    push(raw.replace(/:q\d+\.heic\b/gi, ":q70.jpeg"));
+    push(raw.replace(/~tplv-[^/?#]+/gi, (m) => m.replace(/\.heic\b/gi, ".jpeg")));
+  }
+  return out;
+}
+
+function isAllowedThumbHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return (
+    h === "pbs.twimg.com" ||
+    h === "video.twimg.com" ||
+    h.endsWith(".twimg.com") ||
+    h.endsWith(".cdninstagram.com") ||
+    h.endsWith(".instagram.com") ||
+    h.includes("tiktokcdn") ||
+    h.includes("tiktokv.") ||
+    h.includes("byteoversea") ||
+    h.includes("ibyteimg") ||
+    h.includes("muscdn") ||
+    h.includes("tiktok.com")
+  );
+}
+
+app.get("/api/thumb", async (c) => {
+  try {
+    const rawUrl = c.req.query("url") || "";
+    if (!rawUrl) return c.text("url required", 400);
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return c.text("invalid url", 400);
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return c.text("invalid protocol", 400);
+    }
+    if (!isAllowedThumbHost(parsed.hostname)) {
+      return c.text("host not allowed", 403);
+    }
+
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      Referer: "https://www.tiktok.com/",
+    };
+
+    let lastStatus = 0;
+    for (const candidate of thumbCandidateUrls(parsed.toString())) {
+      let candUrl: URL;
+      try {
+        candUrl = new URL(candidate);
+      } catch {
+        continue;
+      }
+      if (!isAllowedThumbHost(candUrl.hostname)) continue;
+
+      const upstream = await fetch(candUrl.toString(), { headers });
+      lastStatus = upstream.status;
+      if (!upstream.ok) continue;
+
+      let contentType =
+        upstream.headers.get("content-type") || "image/jpeg";
+      // Skip HEIC/HEIF — Chrome/Firefox <img> can't decode them
+      if (/heic|heif/i.test(contentType) || /\.heic(\?|$)/i.test(candUrl.pathname)) {
+        continue;
+      }
+      if (!contentType.startsWith("image/")) continue;
+
+      const buf = await upstream.arrayBuffer();
+      if (!buf.byteLength) continue;
+      c.header("Content-Type", contentType);
+      c.header("Cache-Control", "public, max-age=86400");
+      return c.body(buf);
+    }
+
+    return c.text(`no browser-safe thumb (last ${lastStatus || "n/a"})`, 502);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/thumb]", message);
+    return c.text("thumb failed", 500);
+  }
+});
+
+/** Saved Scraps library — Posts + Media from Airtable. */
+app.get("/api/scraps", async (c) => {
+  try {
+    const type = c.req.query("type") || "all";
+    const user = c.req.query("user") || "";
+    const q = c.req.query("q") || "";
+    const result = await listScraps({ type, user, q });
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/scraps]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/** @deprecated use /api/media/save */
+app.post("/demo/save-media", async (c) => {
+  try {
+    const body = (await c.req.json()) as SaveMediaBody;
+    if (!body?.mediaRecordId) {
+      return c.json({ ok: false, error: "mediaRecordId required" }, 400);
+    }
+    const ids = await inngest.send({
+      name: "media/cdn.ready",
+      data: {
+        mediaRecordId: body.mediaRecordId,
+        postRecordId: body.postRecordId,
+        fileUrl: body.fileUrl,
+        objectKey: body.objectKey,
+        mediaType: body.mediaType,
+        force: Boolean(body.force),
+      },
+    });
+    return c.json({ ok: true, ids, event: "media/cdn.ready" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[demo/save-media]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+async function sendPublic(
+  c: { env: WorkerBindings; header: (k: string, v: string) => void; req: { url: string } },
+  name: string,
+  type: string,
+): Promise<string | Response | null> {
+  if (c.env?.ASSETS) {
+    const url = new URL("/" + name.replace(/^\//, ""), c.req.url);
+    const res = await c.env.ASSETS.fetch(url);
+    if (!res.ok) return null;
+    const headers = new Headers(res.headers);
+    headers.set("Content-Type", type);
+    return new Response(res.body, { status: res.status, headers });
+  }
+  const path = publicDir ? resolve(publicDir, name) : "";
+  if (!publicDir || !existsSync(path)) return null;
+  c.header("Content-Type", type);
+  return readFileSync(path, "utf8");
+}
+
+app.get("/", async (c) => {
+  const html = await sendPublic(c, "index.html", "text/html; charset=utf-8");
+  if (!html) return c.text("UI missing", 404);
+  if (html instanceof Response) return html;
+  return c.body(html);
+});
+
+app.get("/scraps", async (c) => {
+  const html = await sendPublic(c, "scraps.html", "text/html; charset=utf-8");
+  if (!html) return c.text("UI missing", 404);
+  if (html instanceof Response) return html;
+  return c.body(html);
+});
+
+app.get("/batch", async (c) => {
+  const html = await sendPublic(c, "batch.html", "text/html; charset=utf-8");
+  if (!html) return c.text("UI missing", 404);
+  if (html instanceof Response) return html;
+  return c.body(html);
+});
+
+app.get("/docs/api.md", async (c) => {
+  if (c.env?.ASSETS) {
+    // docs live outside public/ — ship a copy under public/docs if present
+    const res = await c.env.ASSETS.fetch(new URL("/docs/api.md", c.req.url));
+    if (res.ok) return res;
+    return c.text("API docs missing", 404);
+  }
+  try {
+    const docsPath = resolve(
+      fileURLToPath(new URL(".", import.meta.url)),
+      "../../../../docs/api.md",
+    );
+    if (!existsSync(docsPath)) return c.text("API docs missing", 404);
+    c.header("Content-Type", "text/markdown; charset=utf-8");
+    return c.body(readFileSync(docsPath, "utf8"));
+  } catch {
+    return c.text("API docs missing", 404);
+  }
+});
+
+app.get("/docs/api", async (c) => {
+  const html = await sendPublic(c, "api-docs.html", "text/html; charset=utf-8");
+  if (!html) return c.text("API docs UI missing", 404);
+  if (html instanceof Response) return html;
+  return c.body(html);
+});
+
+app.get("/ui.css", async (c) => {
+  const css = await sendPublic(c, "ui.css", "text/css; charset=utf-8");
+  if (!css) return c.text("missing", 404);
+  if (css instanceof Response) return css;
+  return c.body(css);
+});
+
+app.get("/ui.js", async (c) => {
+  const js = await sendPublic(c, "ui.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/scraps.js", async (c) => {
+  const js = await sendPublic(c, "scraps.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/theme.js", async (c) => {
+  const js = await sendPublic(c, "theme.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/credits.js", async (c) => {
+  const js = await sendPublic(c, "credits.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/batch.js", async (c) => {
+  const js = await sendPublic(c, "batch.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/batch-store.js", async (c) => {
+  const js = await sendPublic(c, "batch-store.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/vendor/zustand/:file", async (c) => {
+  const file = c.req.param("file");
+  if (!file || file.includes("..") || file.includes("/")) {
+    return c.text("not found", 404);
+  }
+  if (c.env?.ASSETS) {
+    const res = await c.env.ASSETS.fetch(
+      new URL(`/vendor/zustand/${file}`, c.req.url),
+    );
+    if (!res.ok) return c.text("missing", 404);
+    const headers = new Headers(res.headers);
+    headers.set("Content-Type", "application/javascript; charset=utf-8");
+    headers.set("Cache-Control", "public, max-age=86400");
+    return new Response(res.body, { status: res.status, headers });
+  }
+  const path = publicDir ? resolve(publicDir, "vendor/zustand", file) : "";
+  if (!publicDir || !existsSync(path)) return c.text("missing", 404);
+  const body = readFileSync(path, "utf8");
+  c.header("Content-Type", "application/javascript; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=86400");
+  return c.body(body);
+});
+
+  // Health should report runtime
+  return app;
+}
