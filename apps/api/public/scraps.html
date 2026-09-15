@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <title>Saved Scraps — Social Hub</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,7 +13,7 @@
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/ui.css?v=22" />
+    <link rel="stylesheet" href="/ui.css?v=25" />
     <script>
       (function () {
         try {
@@ -68,42 +71,107 @@
         <p class="mark">Your library</p>
         <h1>Saved Scraps</h1>
         <p class="lede">
-          Everything you’ve pulled — text, images, and videos — sorted by when
-          you saved them.
+          Posts keep image, video, and text together. Filter from the side rail —
+          media playback prefs live under Media.
         </p>
       </header>
 
-      <div class="library-tools">
-        <div class="type-tabs" role="tablist" aria-label="Media type">
-          <button type="button" class="tab is-active" data-type="all">All</button>
-          <button type="button" class="tab" data-type="text">Text</button>
-          <button type="button" class="tab" data-type="image">Images</button>
-          <button type="button" class="tab" data-type="video">Videos</button>
-        </div>
-        <div class="tool-row">
-          <label class="sr" for="userFilter">User</label>
-          <select id="userFilter" class="select">
-            <option value="all">All users</option>
-          </select>
-          <label class="sr" for="search">Search</label>
-          <input
-            id="search"
-            class="search"
-            type="search"
-            placeholder="Search text or @user…"
-            autocomplete="off"
-          />
+      <div class="lib-shell">
+        <aside class="lib-rail" aria-label="Library controls">
+          <div class="subtabs" role="tablist" aria-label="Library panels">
+            <button
+              type="button"
+              class="subtab is-active"
+              role="tab"
+              id="tabBrowse"
+              aria-selected="true"
+              aria-controls="panelBrowse"
+              data-panel="browse"
+            >
+              Browse
+            </button>
+            <button
+              type="button"
+              class="subtab"
+              role="tab"
+              id="tabSettings"
+              aria-selected="false"
+              aria-controls="panelSettings"
+              data-panel="settings"
+            >
+              Media
+            </button>
+          </div>
+
+          <div
+            id="panelBrowse"
+            class="rail-panel"
+            role="tabpanel"
+            aria-labelledby="tabBrowse"
+          >
+            <p class="rail-label">Type</p>
+            <div class="type-tabs" role="tablist" aria-label="Media type">
+              <button type="button" class="tab is-active" data-type="all">All</button>
+              <button type="button" class="tab" data-type="text">Text</button>
+              <button type="button" class="tab" data-type="image">Images</button>
+              <button type="button" class="tab" data-type="video">Videos</button>
+            </div>
+
+            <p class="rail-label">Filter</p>
+            <label class="field-label" for="userFilter">User</label>
+            <select id="userFilter" class="select field-control">
+              <option value="all">All users</option>
+            </select>
+
+            <label class="field-label" for="search">Search</label>
+            <input
+              id="search"
+              class="search field-control"
+              type="search"
+              placeholder="Search text or @user…"
+              autocomplete="off"
+              enterkeyhint="search"
+            />
+          </div>
+
+          <div
+            id="panelSettings"
+            class="rail-panel"
+            role="tabpanel"
+            aria-labelledby="tabSettings"
+            hidden
+          >
+            <p class="rail-label">Playback</p>
+            <label class="setting-row" for="autoplayVideos">
+              <span class="setting-copy">
+                <span class="setting-title">Autoplay videos</span>
+                <span class="setting-hint"
+                  >Muted previews when a clip scrolls into view. Off by
+                  default.</span
+                >
+              </span>
+              <input
+                id="autoplayVideos"
+                class="setting-switch"
+                type="checkbox"
+                role="switch"
+              />
+            </label>
+          </div>
+        </aside>
+
+        <div class="lib-main">
+          <p id="libStatus" class="status">Loading scraps…</p>
+          <section id="grid" class="scrap-grid scrap-feed" aria-live="polite"></section>
+          <p id="empty" class="empty" hidden>
+            Nothing here yet. <a href="/">Pull a post</a> to start your library.
+          </p>
         </div>
       </div>
-
-      <p id="libStatus" class="status">Loading scraps…</p>
-      <section id="grid" class="scrap-grid" aria-live="polite"></section>
-      <p id="empty" class="empty" hidden>
-        Nothing here yet. <a href="/">Pull a post</a> to start your library.
-      </p>
     </main>
-    <script src="/theme.js?v=21"></script>
-    <script src="/credits.js?v=20"></script>
-    <script src="/scraps.js?v=20"></script>
+    <script src="/theme.js?v=24"></script>
+    <script src="/media-settings.js?v=24"></script>
+    <script src="/credits.js?v=24"></script>
+    <script src="/scraps.js?v=25"></script>
   </body>
 </html>

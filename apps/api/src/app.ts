@@ -173,18 +173,24 @@ app.get("/api/credits", async (c) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[api/credits]", message);
-    return c.json({ ok: false, error: message }, 500);
+    // Soft-fail so the admin UI still loads when SC_MODE=offline / no cache.
+    return c.json({ ok: true, remaining: null, warning: message });
   }
 });
 
 app.get("/api/credits/history", async (c) => {
   try {
     const page = Number(c.req.query("page") || "1") || 1;
-    const [remaining, history] = await Promise.all([
-      getCreditBalance(),
-      getCreditUsage(page),
-    ]);
-    return c.json({ ok: true, remaining, page, history });
+    let remaining: number | null = null;
+    let warning: string | undefined;
+    try {
+      remaining = await getCreditBalance();
+    } catch (err) {
+      warning = err instanceof Error ? err.message : String(err);
+      console.error("[api/credits/history] balance", warning);
+    }
+    const history = await getCreditUsage(page);
+    return c.json({ ok: true, remaining, page, history, warning });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[api/credits/history]", message);
@@ -322,12 +328,25 @@ app.get("/api/thumb", async (c) => {
 });
 
 /** Saved Scraps library — Posts + Media from Airtable. */
+const scrapsInflight = new Map<
+  string,
+  Promise<Awaited<ReturnType<typeof listScraps>>>
+>();
+
 app.get("/api/scraps", async (c) => {
   try {
     const type = c.req.query("type") || "all";
     const user = c.req.query("user") || "";
     const q = c.req.query("q") || "";
-    const result = await listScraps({ type, user, q });
+    const key = `${type}\0${user}\0${q}`;
+    let pending = scrapsInflight.get(key);
+    if (!pending) {
+      pending = listScraps({ type, user, q }).finally(() => {
+        scrapsInflight.delete(key);
+      });
+      scrapsInflight.set(key, pending);
+    }
+    const result = await pending;
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -403,16 +422,20 @@ app.get("/batch", async (c) => {
 });
 
 app.get("/docs/api.md", async (c) => {
-  if (c.env?.ASSETS) {
-    // docs live outside public/ — ship a copy under public/docs if present
-    const res = await c.env.ASSETS.fetch(new URL("/docs/api.md", c.req.url));
-    if (res.ok) return res;
-    return c.text("API docs missing", 404);
+  // Prefer public/docs/api.md (local + CF Assets). Fall back to repo docs/.
+  const fromPublic = await sendPublic(
+    c,
+    "docs/api.md",
+    "text/markdown; charset=utf-8",
+  );
+  if (fromPublic) {
+    if (fromPublic instanceof Response) return fromPublic;
+    return c.body(fromPublic);
   }
   try {
     const docsPath = resolve(
       fileURLToPath(new URL(".", import.meta.url)),
-      "../../../../docs/api.md",
+      "../../../docs/api.md",
     );
     if (!existsSync(docsPath)) return c.text("API docs missing", 404);
     c.header("Content-Type", "text/markdown; charset=utf-8");
@@ -452,6 +475,17 @@ app.get("/scraps.js", async (c) => {
 
 app.get("/theme.js", async (c) => {
   const js = await sendPublic(c, "theme.js", "application/javascript; charset=utf-8");
+  if (!js) return c.text("missing", 404);
+  if (js instanceof Response) return js;
+  return c.body(js);
+});
+
+app.get("/media-settings.js", async (c) => {
+  const js = await sendPublic(
+    c,
+    "media-settings.js",
+    "application/javascript; charset=utf-8",
+  );
   if (!js) return c.text("missing", 404);
   if (js instanceof Response) return js;
   return c.body(js);

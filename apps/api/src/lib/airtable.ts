@@ -28,21 +28,77 @@ function token() {
   );
 }
 
-async function airtableFetch(path: string, init?: RequestInit) {
-  const res = await fetch(`https://api.airtable.com/v0/${baseId()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token()}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    throw new Error(
-      `Airtable ${init?.method ?? "GET"} ${path}: ${res.status} ${await res.text()}`,
-    );
+function errorCause(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const parts = [err.message];
+  let cur: unknown = err.cause;
+  for (let i = 0; i < 3 && cur; i++) {
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      cur = cur.cause;
+    } else {
+      parts.push(String(cur));
+      break;
+    }
   }
-  return res.json();
+  return parts.join(" → ");
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function airtableFetch(path: string, init?: RequestInit) {
+  const method = init?.method ?? "GET";
+  const url = `https://api.airtable.com/v0/${baseId()}${path}`;
+  const attempts = 3;
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${token()}`,
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {}),
+        },
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const body = await res.text();
+        lastErr = new Error(`Airtable ${method} ${path}: ${res.status} ${body}`);
+        if (attempt < attempts) {
+          await sleep(250 * attempt * attempt);
+          continue;
+        }
+        throw lastErr;
+      }
+      if (!res.ok) {
+        throw new Error(
+          `Airtable ${method} ${path}: ${res.status} ${await res.text()}`,
+        );
+      }
+      return res.json();
+    } catch (err) {
+      lastErr = err;
+      const msg = errorCause(err);
+      const retryable =
+        /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket|network|429|5\d\d/i.test(
+          msg,
+        );
+      if (!retryable || attempt >= attempts) {
+        throw new Error(`Airtable ${method} ${path}: ${msg}`);
+      }
+      console.warn(
+        `[airtable] retry ${attempt}/${attempts} ${method} ${path}: ${msg}`,
+      );
+      await sleep(250 * attempt * attempt);
+    }
+  }
+
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(`Airtable ${method} ${path}: ${errorCause(lastErr)}`);
 }
 
 export type AirtableRecord = { id: string; fields: Record<string, unknown>; createdTime?: string };
@@ -102,6 +158,10 @@ export async function listPosts(pageSize = 50) {
 
 export async function listMedia(pageSize = 100) {
   return listRecords(mediaTable(), { pageSize: Math.min(pageSize, 100) });
+}
+
+export async function listProfiles(pageSize = 100) {
+  return listRecords(profilesTable(), { pageSize: Math.min(pageSize, 100) });
 }
 
 async function createRecord(

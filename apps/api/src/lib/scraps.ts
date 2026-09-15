@@ -1,4 +1,9 @@
-import { listMedia, listPosts, type AirtableRecord } from "./airtable.js";
+import {
+  listMedia,
+  listPosts,
+  listProfiles,
+  type AirtableRecord,
+} from "./airtable.js";
 
 export type ScrapKind = "text" | "image" | "video";
 
@@ -9,6 +14,7 @@ export type ScrapItem = {
   previewUrl?: string;
   fileUrl?: string;
   user: string;
+  avatarUrl?: string;
   platform?: string;
   postLink?: string;
   postRecordId?: string;
@@ -40,22 +46,78 @@ function preferUrl(...urls: Array<string | undefined>) {
   return urls.find((u) => u && /^https?:\/\//i.test(u));
 }
 
+function isLikelyVideoUrl(url?: string): boolean {
+  if (!url) return false;
+  return /\.(mp4|mov|webm|m4v|m3u8)(\?|#|$)/i.test(url);
+}
+
+function isLikelyImageUrl(url?: string): boolean {
+  if (!url || isLikelyVideoUrl(url)) return false;
+  if (/\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(url)) return true;
+  // CDN thumbs without extension (twimg, etc.) — treat as image unless clearly video
+  return true;
+}
+
+function profileAvatar(profile?: AirtableRecord): string | undefined {
+  if (!profile) return undefined;
+  const f = profile.fields;
+  return preferUrl(
+    asStr(f.Avatar),
+    asStr(f.avatar),
+    asStr(f["Profile image"]),
+    asStr(f.Photo),
+  );
+}
+
+function normalizeHandle(h: string): string {
+  return h.replace(/^@/, "").trim().toLowerCase();
+}
+
 /**
- * Build a flat library of saved scraps from Posts + Media.
- * Media rows become image/video cards; posts without media become text cards.
+ * Build a flat library of saved scraps from Posts + Media + Profiles.
  */
 export async function listScraps(filters?: {
   type?: string;
   user?: string;
   q?: string;
 }): Promise<ScrapsResponse> {
-  const [postsRes, mediaRes] = await Promise.all([
+  const [postsRes, mediaRes, profilesRes] = await Promise.all([
     listPosts(80),
     listMedia(100),
+    listProfiles(100).catch(() => ({ records: [] as AirtableRecord[] })),
   ]);
 
   const postsById = new Map<string, AirtableRecord>();
   for (const p of postsRes.records) postsById.set(p.id, p);
+
+  const profilesById = new Map<string, AirtableRecord>();
+  const profilesByHandle = new Map<string, AirtableRecord>();
+  for (const pr of profilesRes.records) {
+    profilesById.set(pr.id, pr);
+    const handle = asStr(pr.fields.Handle);
+    const platform = asStr(pr.fields.Platform) || "";
+    if (handle) {
+      profilesByHandle.set(`${platform.toLowerCase()}:${normalizeHandle(handle)}`, pr);
+      profilesByHandle.set(normalizeHandle(handle), pr);
+    }
+  }
+
+  function resolveAvatar(post?: AirtableRecord, user?: string, platform?: string) {
+    const linked = Array.isArray(post?.fields.Profile)
+      ? (post!.fields.Profile as string[])
+      : [];
+    if (linked[0] && profilesById.has(linked[0])) {
+      return profileAvatar(profilesById.get(linked[0]));
+    }
+    if (user) {
+      const key = `${(platform || "").toLowerCase()}:${normalizeHandle(user)}`;
+      return (
+        profileAvatar(profilesByHandle.get(key)) ||
+        profileAvatar(profilesByHandle.get(normalizeHandle(user)))
+      );
+    }
+    return undefined;
+  }
 
   const postsWithMedia = new Set<string>();
   const items: ScrapItem[] = [];
@@ -73,12 +135,20 @@ export async function listScraps(filters?: {
       asStr(post?.fields.Author) ||
       asStr(f.Label)?.split(" ")[0] ||
       "unknown";
-    const previewUrl = preferUrl(
-      asStr(f["Saved copy"]),
-      asStr(f["Preview link"]),
-      asStr(f["File link"]),
-    );
-    const fileUrl = preferUrl(asStr(f["Saved copy"]), asStr(f["File link"]));
+    const platform = asStr(post?.fields.Platform);
+    const saved = asStr(f["Saved copy"]);
+    const preview = asStr(f["Preview link"]);
+    const fileLink = asStr(f["File link"]);
+    const fileUrl = preferUrl(saved, fileLink);
+    // Videos need an image poster — never reuse the mp4 as previewUrl.
+    const previewUrl =
+      kind === "video"
+        ? preferUrl(
+            isLikelyImageUrl(preview) ? preview : undefined,
+            isLikelyImageUrl(fileLink) ? fileLink : undefined,
+            isLikelyImageUrl(saved) ? saved : undefined,
+          )
+        : preferUrl(saved, preview, fileLink);
 
     items.push({
       id: `media:${m.id}`,
@@ -87,7 +157,8 @@ export async function listScraps(filters?: {
       previewUrl,
       fileUrl,
       user,
-      platform: asStr(post?.fields.Platform),
+      avatarUrl: resolveAvatar(post, user, platform),
+      platform,
       postLink: asStr(post?.fields.Link),
       postRecordId: post?.id,
       mediaRecordId: m.id,
@@ -105,12 +176,15 @@ export async function listScraps(filters?: {
     if (postsWithMedia.has(p.id)) continue;
     const text = asStr(p.fields.Text);
     if (!text) continue;
+    const user = asStr(p.fields.Author) || "unknown";
+    const platform = asStr(p.fields.Platform);
     items.push({
       id: `text:${p.id}`,
       kind: "text",
       text,
-      user: asStr(p.fields.Author) || "unknown",
-      platform: asStr(p.fields.Platform),
+      user,
+      avatarUrl: resolveAvatar(p, user, platform),
+      platform,
       postLink: asStr(p.fields.Link),
       postRecordId: p.id,
       savedAt:
@@ -131,7 +205,10 @@ export async function listScraps(filters?: {
     filtered = filtered.filter((i) => i.kind === type);
   }
   if (user && user !== "all") {
-    filtered = filtered.filter((i) => i.user.toLowerCase() === user);
+    const needle = normalizeHandle(user);
+    filtered = filtered.filter(
+      (i) => normalizeHandle(i.user) === needle,
+    );
   }
   if (q) {
     filtered = filtered.filter(
@@ -143,9 +220,9 @@ export async function listScraps(filters?: {
     );
   }
 
-  const users = [...new Set(items.map((i) => i.user))].sort((a, b) =>
-    a.localeCompare(b),
-  );
+  const users = [
+    ...new Set(items.map((i) => normalizeHandle(i.user)).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
 
   return {
     ok: true,

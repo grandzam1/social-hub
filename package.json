@@ -2,8 +2,12 @@
   "name": "social-hub",
   "private": true,
   "scripts": {
+    "dev": "npx concurrently -k -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "npm run dev --prefix apps/api",
+    "dev:web": "npm run dev --prefix apps/web",
     "dev:inngest": "npx inngest-cli@latest dev -u http://127.0.0.1:8787/api/inngest",
+    "build:web": "npm run build --prefix apps/web",
+    "install:web": "npm install --prefix apps/web",
     "test:inngest-cloud": "node scripts/test-inngest-cloud.mjs",
     "save-media": "node scripts/automate-save-media.mjs",
     "save-media:sync": "node scripts/automate-save-media.mjs --sync",
@@ -11,9 +15,13 @@
     "sc": "node scripts/sc.mjs",
     "sc:offline": "SC_MODE=offline node scripts/sc.mjs",
     "sc:fixtures": "node scripts/sc.mjs fixture list",
+    "e2e:cloud": "node scripts/e2e-cloud.mjs",
     "cf:check": "node scripts/cf-check.mjs",
     "cf:login": "npm run cf:login --prefix apps/api",
     "cf:dry": "npm run cf:dry --prefix apps/api",
     "cf:deploy": "npm run cf:deploy --prefix apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }
