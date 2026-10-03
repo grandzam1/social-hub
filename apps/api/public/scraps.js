@@ -105,20 +105,20 @@ function normalizeCaption(raw) {
 }
 
 function statusBadge(post) {
-  const statuses = post.media.map((m) => m.fileStatus).filter(Boolean);
-  if (statuses.some((s) => /saved copy ready/i.test(s))) {
+  const statuses = post.media.map((m) => m.saveStatus).filter(Boolean);
+  if (statuses.length && statuses.every((s) => s === "saved")) {
     return { label: "Saved", tone: "ok" };
   }
-  if (statuses.some((s) => /file link ready/i.test(s))) {
-    return { label: "File link ready", tone: "warn" };
+  if (statuses.some((s) => s === "failed")) {
+    return { label: "Failed", tone: "warn" };
+  }
+  if (statuses.some((s) => s === "pending")) {
+    return { label: "Pending", tone: "warn" };
   }
   if (post.media.length === 0) {
     return { label: "Text", tone: "neutral" };
   }
-  const first = statuses[0];
-  return first
-    ? { label: first, tone: "neutral" }
-    : { label: post.media[0]?.kind || "Media", tone: "neutral" };
+  return { label: post.media[0]?.kind || "Media", tone: "neutral" };
 }
 
 function groupPosts(items) {
@@ -147,8 +147,7 @@ function groupPosts(items) {
       g.savedAt = item.savedAt;
     }
 
-    const hasFile = Boolean(item.fileUrl || item.previewUrl);
-    if (item.kind === "text" && !hasFile) continue;
+    if (item.kind === "text") continue;
     if (item.kind === "image" || item.kind === "video") {
       g.media.push(item);
     }
@@ -167,60 +166,66 @@ function groupPosts(items) {
 function pickLayout(media) {
   const n = media.length;
   if (n === 0) return "text";
-  const ready = media.filter((m) => m.fileUrl || m.previewUrl);
-  if (ready.length === 0) return "empty";
   if (n === 1) return "single";
   return "slider";
 }
 
-function mediaSrc(item) {
-  return item.previewUrl || item.fileUrl || "";
+function savedCopyOf(item) {
+  if (item.saveStatus !== "saved") return "";
+  return item.savedCopy || item.fileUrl || "";
 }
 
-function isLikelyVideoUrl(url) {
-  return /\.(mp4|mov|webm|m4v|m3u8)(\?|#|$)/i.test(String(url || ""));
+function slideLabel(item, index) {
+  const kind = item.kind === "video" ? "Video" : "Image";
+  const n = (typeof item.order === "number" ? item.order : index) + 1;
+  return `${kind} ${n}`;
 }
 
-function isLikelyImageUrl(url) {
-  const u = String(url || "");
-  if (!u || isLikelyVideoUrl(u)) return false;
-  return true;
+function mediaAttr(item) {
+  const id = item.mediaRecordId || "";
+  return id ? ` data-media="${escapeAttr(id)}"` : "";
+}
+
+function pendingCell(item, kind) {
+  return `<figure class="media-cell kind-${kind} is-empty is-pending"${mediaAttr(item)}>
+      <div class="media-spinner" aria-hidden="true"></div>
+      <span class="media-empty-label">Waiting for saved copy</span>
+    </figure>`;
+}
+
+function failedCell(item, kind) {
+  return `<figure class="media-cell kind-${kind} is-empty is-failed"${mediaAttr(item)}>
+      <span class="media-empty-label">Save failed</span>
+    </figure>`;
 }
 
 function mediaCellHtml(item, opts = {}) {
-  const open = item.fileUrl || item.previewUrl || "";
   const kind = item.kind === "video" ? "video" : "image";
+  const status = item.saveStatus || "pending";
+  if (status === "failed") return failedCell(item, kind);
+  const src = savedCopyOf(item);
+  if (status !== "saved" || !src) return pendingCell(item, kind);
 
   if (kind === "video") {
-    const videoSrc =
-      item.fileUrl ||
-      (isLikelyVideoUrl(item.previewUrl) ? item.previewUrl : "") ||
-      "";
-    const poster = isLikelyImageUrl(item.previewUrl) ? item.previewUrl : "";
-    if (!videoSrc) {
-      return `<figure class="media-cell kind-video is-empty">
-      <div class="media-spinner" aria-hidden="true"></div>
-      <span class="media-empty-label">Waiting</span>
-    </figure>`;
-    }
+    const watch = Boolean(opts.watch);
     const autoplay =
+      !watch &&
       typeof window.SocialHubMedia !== "undefined" &&
       window.SocialHubMedia.getAutoplay();
-    const forceControls = opts.controls ? "1" : "0";
-    return `<figure class="media-cell kind-video">
+    const forceControls = watch || opts.controls ? "1" : "0";
+    return `<figure class="media-cell kind-video"${mediaAttr(item)}>
       <video
         class="media-el"
         data-media-video
         data-force-controls="${forceControls}"
         playsinline
-        muted
+        ${watch ? "" : "muted"}
         preload="metadata"
-        ${poster ? `poster="${escapeAttr(poster)}"` : ""}
-        src="${escapeAttr(videoSrc)}"
-        ${opts.controls && !autoplay ? "controls" : ""}
+        src="${escapeAttr(src)}"
+        ${watch || (opts.controls && !autoplay) ? "controls" : ""}
       ></video>
       ${
-        autoplay
+        watch || autoplay
           ? ""
           : `<button type="button" class="media-play" aria-label="Play video"></button>`
       }
@@ -228,34 +233,18 @@ function mediaCellHtml(item, opts = {}) {
     </figure>`;
   }
 
-  const src = mediaSrc(item);
-  if (!src) {
-    return `<figure class="media-cell kind-image is-empty">
-      <div class="media-spinner" aria-hidden="true"></div>
-      <span class="media-empty-label">Waiting</span>
-    </figure>`;
-  }
-
   const img = `<img class="media-el" src="${escapeAttr(src)}" alt="" loading="lazy" />`;
-  if (open) {
-    return `<figure class="media-cell kind-image">
-      <a class="media-hit" href="${escapeAttr(open)}" target="_blank" rel="noreferrer">${img}</a>
-    </figure>`;
+  if (opts.watch) {
+    return `<figure class="media-cell kind-image"${mediaAttr(item)}>${img}</figure>`;
   }
-  return `<figure class="media-cell kind-image">${img}</figure>`;
+  return `<figure class="media-cell kind-image"${mediaAttr(item)}>
+      <button type="button" class="media-hit" aria-label="View media">${img}</button>
+    </figure>`;
 }
 
 function mediaStripHtml(post) {
   const layout = pickLayout(post.media);
   if (layout === "text") return "";
-  if (layout === "empty") {
-    return `<div class="post-media" data-layout="empty">
-      <figure class="media-cell is-empty is-wide">
-        <div class="media-spinner" aria-hidden="true"></div>
-        <span class="media-empty-label">File link ready — waiting for saved copy</span>
-      </figure>
-    </div>`;
-  }
   if (layout === "single") {
     const m = post.media[0];
     return `<div class="post-media" data-layout="single">${mediaCellHtml(m, { controls: m.kind === "video" })}</div>`;
@@ -290,11 +279,10 @@ function mediaStripHtml(post) {
 }
 
 function avatarHtml(post) {
-  if (post.avatarUrl) {
-    const hi = String(post.avatarUrl).replace("_normal.", "_400x400.");
-    return `<img class="post-avatar-img" src="${escapeAttr(hi)}" alt="" loading="lazy" width="40" height="40" />`;
-  }
-  return `<span class="post-avatar-fallback" aria-hidden="true">${escapeHtml(platformGlyph(post.platform))}</span>`;
+  const fallback = `<span class="post-avatar-fallback" aria-hidden="true">${escapeHtml(platformGlyph(post.platform))}</span>`;
+  if (!post.avatarUrl) return fallback;
+  const hi = String(post.avatarUrl).replace("_normal.", "_400x400.");
+  return `<img class="post-avatar-img" src="${escapeAttr(hi)}" alt="" width="40" height="40" onerror="this.hidden=true;var n=this.nextElementSibling;if(n)n.hidden=false" />${fallback.replace("aria-hidden=\"true\"", "hidden")}`;
 }
 
 function captionBlockHtml(caption) {
@@ -309,10 +297,32 @@ function captionBlockHtml(caption) {
   </div>`;
 }
 
+function saveButtonHtml(post) {
+  if (!post.media.length) return "";
+  const ready = post.media.some((m) => savedCopyOf(m));
+  return `<button type="button" class="post-save"${ready ? "" : " disabled"} aria-label="Save media to your device" title="Save the current file to your device">Save</button>`;
+}
+
+function headerMenuHtml(post) {
+  if (!post.media.length) {
+    return `<span class="post-menu is-disabled" aria-hidden="true">⋯</span>`;
+  }
+  const original = post.postLink
+    ? `<a class="post-menu-link" href="${escapeAttr(post.postLink)}" target="_blank" rel="noreferrer">Open original</a>`
+    : "";
+  return `<div class="post-menu-wrap">
+      <button type="button" class="post-menu" aria-expanded="false" aria-label="Post actions" title="Post actions">⋯</button>
+      <div class="post-menu-list" hidden>
+        <button type="button" class="post-menu-link post-menu-view">View media</button>
+        ${original}
+      </div>
+    </div>`;
+}
 function postCardHtml(post) {
   const badge = statusBadge(post);
   const caption = normalizeCaption(post.text || "");
   const layout = pickLayout(post.media);
+  const saveControl = saveButtonHtml(post);
 
   return `
     <article class="post-card" data-platform="${escapeAttr(post.platform || "")}" data-layout="${layout}" data-post="${escapeAttr(post.key)}">
@@ -330,11 +340,7 @@ function postCardHtml(post) {
               : ""
           }
         </div>
-        ${
-          post.postLink
-            ? `<a class="post-menu" href="${escapeAttr(post.postLink)}" target="_blank" rel="noreferrer" aria-label="Open original" title="Open original">⋯</a>`
-            : `<span class="post-menu is-disabled" aria-hidden="true">⋯</span>`
-        }
+        ${headerMenuHtml(post)}
       </header>
 
       ${captionBlockHtml(caption)}
@@ -344,19 +350,14 @@ function postCardHtml(post) {
         <div class="post-foot-pills">
           ${post.media
             .slice(0, 3)
-            .map((m) =>
-              m.fileStatus
-                ? `<span class="pill">${escapeHtml(m.kind)} · ${escapeHtml(m.fileStatus)}</span>`
-                : `<span class="pill">${escapeHtml(m.kind)}</span>`,
-            )
+            .map((m) => {
+              const status = m.saveStatus || "pending";
+              return `<span class="pill">${escapeHtml(m.kind)} · ${escapeHtml(status)}</span>`;
+            })
             .join("")}
           ${post.media.length === 0 ? `<span class="pill">text</span>` : ""}
         </div>
-        ${
-          post.postLink
-            ? `<a class="post-open" href="${escapeAttr(post.postLink)}" target="_blank" rel="noreferrer">Open original</a>`
-            : ""
-        }
+        ${saveControl ? `<div class="post-foot-actions">${saveControl}</div>` : ""}
       </footer>
     </article>
   `;
@@ -495,6 +496,35 @@ function onSliderPointerUp(e) {
   else setSliderIndex(slider, index);
 }
 
+const saveUnsavedBtn = document.getElementById("saveUnsaved");
+let saveUnsavedBusy = false;
+
+function viewingAll() {
+  return state.type === "all" && state.user === "all" && !state.q;
+}
+
+function unsavedItems(items) {
+  return items.filter(
+    (item) =>
+      item.mediaRecordId &&
+      item.kind !== "text" &&
+      item.saveStatus !== "saved",
+  );
+}
+
+function syncSaveUnsavedButton() {
+  if (!saveUnsavedBtn || saveUnsavedBusy) return;
+  const n = unsavedItems(state.items).length;
+  if (viewingAll() && n === 0) {
+    saveUnsavedBtn.hidden = true;
+    return;
+  }
+  saveUnsavedBtn.hidden = false;
+  saveUnsavedBtn.disabled = false;
+  saveUnsavedBtn.textContent =
+    viewingAll() && n ? `Save unsaved (${n})` : "Save unsaved";
+}
+
 function render() {
   updateTabCounts();
   if (!state.items.length) {
@@ -506,11 +536,94 @@ function render() {
   empty.hidden = true;
   const posts = groupPosts(state.items);
   statusEl.textContent = `${posts.length} post${posts.length === 1 ? "" : "s"} · ${state.items.length} file${state.items.length === 1 ? "" : "s"}`;
+  statusEl.classList.remove("err");
   grid.innerHTML = posts.map(postCardHtml).join("");
   for (const slider of grid.querySelectorAll(".media-slider")) {
     setSliderIndex(slider, Number(slider.dataset.index || 0), { animate: false });
   }
   window.SocialHubMedia?.observeRoot(grid);
+  syncSaveUnsavedButton();
+}
+
+function keepScroll(run) {
+  const x = window.scrollX;
+  const y = window.scrollY;
+  run();
+  window.scrollTo(x, y);
+  requestAnimationFrame(() => window.scrollTo(x, y));
+}
+
+/** Swap one slide after a retry. Leave scroll position and the carousel index alone. */
+function applySavedMedia(mediaRecordId, savedCopy) {
+  const item = state.items.find((row) => row.mediaRecordId === mediaRecordId);
+  if (item) {
+    item.saveStatus = "saved";
+    item.savedCopy = savedCopy;
+    item.fileUrl = savedCopy;
+    if (item.kind === "image") item.previewUrl = savedCopy;
+  }
+  const cell = grid.querySelector(
+    `[data-media="${CSS.escape(mediaRecordId)}"]`,
+  );
+  const card = cell?.closest(".post-card");
+  if (!item) return;
+
+  keepScroll(() => {
+    if (!cell || !card) return;
+    if (cell) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = mediaCellHtml(item, {
+        controls: item.kind === "video",
+      });
+      const next = wrap.firstElementChild;
+      if (next) cell.replaceWith(next);
+    }
+
+    const post = groupPosts(state.items).find(
+      (row) => row.key === card.dataset.post,
+    );
+    if (!post) return;
+
+    const badge = statusBadge(post);
+    const badgeEl = card.querySelector(".post-badge");
+    if (badgeEl) {
+      badgeEl.className = `post-badge tone-${badge.tone}`;
+      badgeEl.textContent = badge.label;
+    }
+
+    const pills = card.querySelector(".post-foot-pills");
+    if (pills) {
+      pills.innerHTML = post.media.length
+        ? post.media
+            .slice(0, 3)
+            .map((m) => {
+              const status = m.saveStatus || "pending";
+              return `<span class="pill">${escapeHtml(m.kind)} · ${escapeHtml(status)}</span>`;
+            })
+            .join("")
+        : `<span class="pill">text</span>`;
+    }
+
+    const saveBtn = card.querySelector(".post-save");
+    if (saveBtn && post.media.some((m) => savedCopyOf(m))) {
+      saveBtn.disabled = false;
+    }
+
+    const head = card.querySelector(".post-card-head");
+    const oldMenu = head?.querySelector(
+      ":scope > .post-menu, :scope > .post-menu-wrap",
+    );
+    if (head && oldMenu) {
+      const holder = document.createElement("div");
+      holder.innerHTML = headerMenuHtml(post);
+      const nextMenu = holder.firstElementChild;
+      if (nextMenu) oldMenu.replaceWith(nextMenu);
+    }
+  });
+  if (mediaViewState.key === card.dataset.post && mediaView && !mediaView.hidden) {
+    renderMediaView();
+  }
+  syncSaveUnsavedButton();
 }
 
 async function load() {
@@ -539,6 +652,369 @@ async function load() {
   }
 }
 
+saveUnsavedBtn?.addEventListener("click", async () => {
+  if (saveUnsavedBusy) return;
+  saveUnsavedBusy = true;
+  saveUnsavedBtn.disabled = true;
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const hold = () => window.scrollTo(scrollX, scrollY);
+  try {
+    const res = await fetch("/api/scraps?type=all");
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || "Failed to list scraps");
+    const unsaved = unsavedItems(data.items || []);
+    const postIds = [
+      ...new Set(unsaved.map((item) => item.postRecordId).filter(Boolean)),
+    ];
+    if (!postIds.length) {
+      saveUnsavedBtn.textContent = "All saved";
+      saveUnsavedBtn.hidden = viewingAll();
+      return;
+    }
+    let savedCount = 0;
+    let failedCount = 0;
+    for (let i = 0; i < postIds.length; i++) {
+      saveUnsavedBtn.textContent = `Saving ${i + 1} of ${postIds.length}`;
+      hold();
+      const saveRes = await fetch("/api/media/save-unsaved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postRecordId: postIds[i] }),
+      });
+      const saveData = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok || saveData.ok === false) {
+        const waiting = unsaved.filter(
+          (item) => item.postRecordId === postIds[i],
+        ).length;
+        failedCount += waiting || 1;
+        continue;
+      }
+      for (const row of saveData.saved || []) {
+        applySavedMedia(row.mediaRecordId, row.savedCopy);
+        savedCount += 1;
+      }
+      failedCount += (saveData.failed || []).length;
+      hold();
+    }
+    saveUnsavedBtn.textContent = failedCount
+      ? `Saved ${savedCount}, ${failedCount} still waiting`
+      : `Saved ${savedCount}`;
+  } catch (err) {
+    statusEl.textContent = err instanceof Error ? err.message : String(err);
+    statusEl.classList.add("err");
+    saveUnsavedBtn.textContent = "Save unsaved";
+  } finally {
+    saveUnsavedBusy = false;
+    saveUnsavedBtn.disabled = false;
+    hold();
+    if (viewingAll() && unsavedItems(state.items).length === 0) {
+      saveUnsavedBtn.hidden = true;
+    }
+  }
+});
+
+function flashSaveLabel(btn, text, failed) {
+  btn.textContent = text;
+  btn.classList.toggle("is-failed", Boolean(failed));
+  setTimeout(() => {
+    if (btn.dataset.busy === "1") return;
+    btn.textContent = "Save";
+    btn.classList.remove("is-failed");
+  }, 1400);
+}
+
+function currentMediaFile(card) {
+  const slider = card.querySelector(".media-slider");
+  const root = slider
+    ? slider.querySelector(".media-slide.is-active")
+    : card.querySelector(".post-media") || card.querySelector(".media-view-stage");
+  if (!root) return null;
+  const video = root.querySelector("video");
+  const img = root.querySelector("img.media-el");
+  const src =
+    video?.currentSrc ||
+    video?.getAttribute("src") ||
+    img?.currentSrc ||
+    img?.getAttribute("src") ||
+    "";
+  if (!src) return null;
+  let name = video ? "video.mp4" : "image.jpg";
+  try {
+    const base = decodeURIComponent(
+      new URL(src, location.href).pathname.split("/").filter(Boolean).pop() ||
+        "",
+    );
+    if (base) name = base;
+  } catch (_) {}
+  const lower = name.toLowerCase();
+  const type = video
+    ? lower.endsWith(".webm")
+      ? "video/webm"
+      : lower.endsWith(".mov")
+        ? "video/quicktime"
+        : "video/mp4"
+    : lower.endsWith(".png")
+      ? "image/png"
+      : lower.endsWith(".webp")
+        ? "image/webp"
+        : lower.endsWith(".gif")
+          ? "image/gif"
+          : "image/jpeg";
+  return { src, name, type };
+}
+
+function triggerDownload(href, name) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  a.rel = "noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function saveMediaToDevice(meta) {
+  const endpoint = `/api/media/download?url=${encodeURIComponent(meta.src)}`;
+  const canTryShare =
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function";
+  if (!canTryShare) {
+    triggerDownload(endpoint, meta.name);
+    return;
+  }
+  const res = await fetch(endpoint);
+  if (!res.ok) throw new Error("Could not fetch media");
+  const blob = await res.blob();
+  const fileType =
+    blob.type && blob.type !== "application/octet-stream" ? blob.type : meta.type;
+  const file = new File([blob], meta.name, { type: fileType });
+  const shareData = { files: [file], title: "Save media" };
+  if (navigator.canShare(shareData)) {
+    try {
+      await navigator.share(shareData);
+      return;
+    } catch (err) {
+      const canceled =
+        err?.name === "AbortError" && /cancel/i.test(String(err.message || ""));
+      if (canceled) throw err;
+    }
+  }
+  const objectUrl = URL.createObjectURL(blob);
+  triggerDownload(objectUrl, meta.name);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+}
+
+const mediaView = document.getElementById("mediaView");
+let mediaViewState = { key: null, index: 0, scrollX: 0, scrollY: 0 };
+
+function postByKey(key) {
+  return groupPosts(state.items).find((row) => row.key === key) || null;
+}
+
+function closePostMenus(except) {
+  for (const list of document.querySelectorAll(".post-menu-list")) {
+    if (except && list === except) continue;
+    list.hidden = true;
+    list
+      .closest(".post-menu-wrap")
+      ?.querySelector(".post-menu")
+      ?.setAttribute("aria-expanded", "false");
+  }
+}
+
+function togglePostMenu(menuBtn) {
+  const wrap = menuBtn.closest(".post-menu-wrap");
+  const list = wrap?.querySelector(".post-menu-list");
+  const open = list?.hidden !== false;
+  closePostMenus(open ? list : null);
+  if (list && open) {
+    list.hidden = false;
+    menuBtn.setAttribute("aria-expanded", "true");
+  }
+}
+
+function renderMediaView() {
+  if (!mediaView || !mediaViewState.key) return;
+  const post = postByKey(mediaViewState.key);
+  if (!post || !post.media.length) {
+    closeMediaView();
+    return;
+  }
+  const index = Math.max(
+    0,
+    Math.min(mediaViewState.index, post.media.length - 1),
+  );
+  mediaViewState.index = index;
+  const item = post.media[index];
+  const multi = post.media.length > 1;
+  const ready = Boolean(savedCopyOf(item));
+  const focused = document.activeElement;
+  const step = focused?.dataset?.viewStep || "";
+  mediaView.innerHTML = `
+    <header class="media-view-bar">
+      <button type="button" class="media-view-back">Back</button>
+      <div class="post-avatar">${avatarHtml(post)}</div>
+      <div class="post-identity">
+        <span class="post-name">${escapeHtml(post.user)}</span>
+        ${
+          post.platform
+            ? `<span class="post-platform">${escapeHtml(post.platform)}</span>`
+            : ""
+        }
+      </div>
+      ${headerMenuHtml(post)}
+    </header>
+    <div class="media-view-stage">
+      ${mediaCellHtml(item, { watch: true })}
+    </div>
+    <div class="media-view-controls${multi ? " is-multi" : ""}">
+      ${
+        multi
+          ? `<button type="button" class="media-view-nav" data-view-step="-1">Previous</button>
+             <span class="media-view-count">${index + 1} / ${post.media.length}</span>`
+          : ""
+      }
+      <button type="button" class="post-save media-view-save"${ready ? "" : " disabled"}>Save</button>
+      ${
+        multi
+          ? `<button type="button" class="media-view-nav" data-view-step="1">Next</button>`
+          : ""
+      }
+    </div>
+  `;
+  if (step) {
+    mediaView.querySelector(`[data-view-step="${step}"]`)?.focus();
+  }
+}
+
+function openMediaView(post, index) {
+  if (!mediaView || !post?.media?.length) return;
+  closePostMenus();
+  mediaViewState = {
+    key: post.key,
+    index: Number.isFinite(index) ? index : 0,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+  };
+  renderMediaView();
+  mediaView.hidden = false;
+  document.body.style.overflow = "hidden";
+  mediaView.querySelector(".media-view-back")?.focus();
+}
+
+function closeMediaView() {
+  if (!mediaView || mediaView.hidden) return;
+  mediaView.querySelector("video")?.pause();
+  mediaView.hidden = true;
+  mediaView.innerHTML = "";
+  mediaViewState.key = null;
+  document.body.style.overflow = rail && !rail.hidden ? "hidden" : "";
+  window.scrollTo(mediaViewState.scrollX, mediaViewState.scrollY);
+}
+
+function stepMediaView(delta) {
+  const post = postByKey(mediaViewState.key);
+  if (!post || post.media.length < 2) return;
+  const count = post.media.length;
+  mediaViewState.index = (mediaViewState.index + delta + count) % count;
+  renderMediaView();
+}
+
+async function onSaveButton(saveBtn) {
+  if (saveBtn.disabled || saveBtn.dataset.busy === "1") return;
+  const scope = saveBtn.closest(".media-view") || saveBtn.closest(".post-card");
+  const meta = scope ? currentMediaFile(scope) : null;
+  if (!meta) {
+    flashSaveLabel(saveBtn, "Not ready", true);
+    return;
+  }
+  saveBtn.dataset.busy = "1";
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Preparing…";
+  try {
+    await saveMediaToDevice(meta);
+    flashSaveLabel(saveBtn, "Saved", false);
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      saveBtn.textContent = "Save";
+    } else {
+      flashSaveLabel(saveBtn, "Try again", true);
+    }
+  } finally {
+    saveBtn.dataset.busy = "";
+    saveBtn.disabled = false;
+  }
+}
+
+function onLibraryClick(e) {
+  const hit = e.target.closest?.(".post-card .media-hit");
+  if (hit) {
+    e.preventDefault();
+    const card = hit.closest(".post-card");
+    const slide = hit.closest(".media-slide");
+    const index = slide ? Number(slide.dataset.slide || 0) : 0;
+    const post = card ? postByKey(card.dataset.post) : null;
+    if (post) openMediaView(post, index);
+    return true;
+  }
+
+  const viewBtn = e.target.closest?.(".post-menu-view");
+  if (viewBtn) {
+    e.preventDefault();
+    const card = viewBtn.closest(".post-card");
+    if (!card) {
+      closePostMenus();
+      return true;
+    }
+    if (card) {
+      const post = postByKey(card.dataset.post);
+      const slider = card.querySelector(".media-slider");
+      const index = slider ? Number(slider.dataset.index || 0) : 0;
+      if (post) openMediaView(post, index);
+    }
+    return true;
+  }
+
+  const menuBtn = e.target.closest?.(".post-menu-wrap .post-menu");
+  if (menuBtn) {
+    e.preventDefault();
+    togglePostMenu(menuBtn);
+    return true;
+  }
+
+  const menuLink = e.target.closest?.(".post-menu-list a");
+  if (menuLink) {
+    closePostMenus();
+    return false;
+  }
+
+  if (!e.target.closest?.(".post-menu-list")) closePostMenus();
+
+  const back = e.target.closest?.(".media-view-back");
+  if (back) {
+    e.preventDefault();
+    closeMediaView();
+    return true;
+  }
+
+  const stepBtn = e.target.closest?.("[data-view-step]");
+  if (stepBtn) {
+    e.preventDefault();
+    stepMediaView(Number(stepBtn.dataset.viewStep || 0));
+    return true;
+  }
+
+  const saveBtn = e.target.closest?.(".post-save");
+  if (saveBtn) {
+    e.preventDefault();
+    void onSaveButton(saveBtn);
+    return true;
+  }
+
+  return false;
+}
+
 grid.addEventListener("pointerdown", onSliderPointerDown);
 grid.addEventListener("pointermove", onSliderPointerMove);
 grid.addEventListener("pointerup", onSliderPointerUp);
@@ -550,6 +1026,8 @@ grid.addEventListener("click", async (e) => {
     e.stopPropagation();
     return;
   }
+  if (onLibraryClick(e)) return;
+
   const copyBtn = e.target.closest?.(".caption-copy");
   if (copyBtn) {
     e.preventDefault();
@@ -600,6 +1078,37 @@ grid.addEventListener("click", async (e) => {
   btn.remove();
   video.muted = false;
   video.play().catch(() => {});
+});
+
+const rail = document.getElementById("libRail");
+const railBackdrop = document.getElementById("railBackdrop");
+const railOpen = document.getElementById("railOpen");
+const railClose = document.getElementById("railClose");
+
+mediaView?.addEventListener("click", (e) => {
+  onLibraryClick(e);
+});
+
+function setRailOpen(open) {
+  if (!rail || !railBackdrop || !railOpen) return;
+  rail.hidden = !open;
+  railBackdrop.hidden = !open;
+  railOpen.setAttribute("aria-expanded", open ? "true" : "false");
+  document.body.style.overflow =
+    open || (mediaView && !mediaView.hidden) ? "hidden" : "";
+  if (open) railClose?.focus();
+}
+
+railOpen?.addEventListener("click", () => setRailOpen(true));
+railClose?.addEventListener("click", () => setRailOpen(false));
+railBackdrop?.addEventListener("click", () => setRailOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (mediaView && !mediaView.hidden) {
+    closeMediaView();
+    return;
+  }
+  if (rail && !rail.hidden) setRailOpen(false);
 });
 
 /* Side rail subtaps */

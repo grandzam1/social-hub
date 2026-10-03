@@ -1,3 +1,4 @@
 {
+    "specstory.autoSave.enabled": true,
     "specstory.cloudSync.enabled": "always"
 }

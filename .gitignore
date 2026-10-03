@@ -8,3 +8,4 @@ dist/
 .cache/
 .specstory/
 apps/api/public/admin/
+.trigger

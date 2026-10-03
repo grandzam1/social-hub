@@ -1,4 +1,6 @@
 import {
+  findProfile,
+  updateMedia,
   upsertMedia,
   upsertPost,
   upsertProfile,
@@ -16,10 +18,14 @@ import {
   normalizeTikTok,
   normalizeX,
 } from "./normalize.js";
-import { saveMediaCdnToR2 } from "./save-media.js";
+import { recordMediaSaveFailure, saveMediaCdnToR2 } from "./save-media.js";
 import { refreshPostSaveStatus } from "./post-status.js";
+import { saveStatusFields } from "./save-status.js";
 import type { NormalizedScrape } from "./types.js";
-import { inngest } from "../inngest/client.js";
+import { queueMediaSaves } from "./queue-media-save.js";
+import { isHostedMediaUrl } from "./r2.js";
+import { saveAvatarToR2 } from "./profile-avatar.js";
+import { invalidateLibrary } from "./library-cache.js";
 
 export type ScrapePostInput = {
   url: string;
@@ -101,6 +107,24 @@ export async function scrapePostPipeline(
     .sort((a, b) => a.order - b.order)
     .map((m, i) => ({ ...m, order: i }));
 
+  const existingProfile = await findProfile(
+    normalized.authorHandle,
+    normalized.platform,
+  );
+  const existingAvatar = String(existingProfile?.fields.Avatar ?? "");
+  let avatar = isHostedMediaUrl(existingAvatar) ? existingAvatar : "";
+  if (!avatar && normalized.authorAvatar) {
+    try {
+      avatar = await saveAvatarToR2({
+        platform: normalized.platform,
+        handle: normalized.authorHandle,
+        sourceUrl: normalized.authorAvatar,
+      });
+    } catch {
+      avatar = "";
+    }
+  }
+
   const profile = await upsertProfile({
     Handle: normalized.authorHandle,
     Name: normalized.authorName,
@@ -112,7 +136,7 @@ export async function scrapePostPipeline(
           ? `https://www.tiktok.com/@${normalized.authorHandle.replace(/^@/, "")}`
           : `https://x.com/${normalized.authorHandle.replace(/^@/, "")}`,
     Followers: normalized.authorFollowers,
-    Avatar: normalized.authorAvatar,
+    ...(avatar ? { Avatar: avatar } : {}),
     Verified: normalized.authorVerified,
     "Platform User ID": normalized.platformUserId,
   });
@@ -178,7 +202,7 @@ export async function scrapePostPipeline(
       "Duration ms": asset.durationMs,
       "File type": asset.fileType,
       "File scraper": "scrapecreators",
-      "File status": "File link ready",
+      ...saveStatusFields("pending"),
       "Old file status": "cdn_ready",
       Label: `${normalized.platform} slide ${asset.order}`,
     });
@@ -192,7 +216,7 @@ export async function scrapePostPipeline(
       fileLink: asset.fileUrl,
       previewLink: asset.previewUrl,
       savedCopy: String(media.fields["Saved copy"] ?? "") || undefined,
-      fileStatus: String(media.fields["File status"] ?? "File link ready"),
+      fileStatus: String(media.fields.saveStatus ?? "pending"),
       width: asset.width,
       height: asset.height,
       durationMs: asset.durationMs,
@@ -207,49 +231,11 @@ export async function scrapePostPipeline(
     });
   }
 
-  if (saveMode === "async" && mediaOut.length) {
-    const events = mediaOut.map((m) => ({
-      name: "media/cdn.ready" as const,
-      data: {
-        mediaRecordId: m.id,
-        postRecordId: post.id,
-        fileUrl: m.fileLink,
-        mediaType: m.type,
-        force: Boolean(input.force),
-        order: m.order,
-      },
-    }));
+  const saveOne = async (
+    m: (typeof mediaOut)[number],
+    extra?: Record<string, unknown>,
+  ) => {
     try {
-      // One batch send → Inngest runs saves concurrently (concurrency limit on fn)
-      const ids = await inngest.send(events);
-      for (const m of mediaOut) {
-        m.fileStatus = "Saving…";
-        m.save = { queued: true, batch: ids };
-      }
-      await refreshPostSaveStatus(post.id, { saving: true });
-    } catch (err) {
-      // Don't fail the whole scrape if the queue is down — save in-request instead.
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn("[scrape-post] Inngest queue failed; falling back to sync:", message);
-      saveMode = "sync";
-      for (const m of mediaOut) {
-        const saved = await saveMediaCdnToR2({
-          mediaRecordId: m.id,
-          postRecordId: post.id,
-          fileUrl: m.fileLink,
-          mediaType: m.type,
-          force: Boolean(input.force),
-        });
-        m.save = { ...saved, fallbackFromAsync: true, queueError: message };
-        if (saved.ok) {
-          m.savedCopy = saved.savedCopy;
-          m.fileStatus = "Saved copy ready";
-        }
-      }
-      await refreshPostSaveStatus(post.id, { saving: true });
-    }
-  } else if (saveMode === "sync" && mediaOut.length) {
-    for (const m of mediaOut) {
       const saved = await saveMediaCdnToR2({
         mediaRecordId: m.id,
         postRecordId: post.id,
@@ -257,11 +243,60 @@ export async function scrapePostPipeline(
         mediaType: m.type,
         force: Boolean(input.force),
       });
-      m.save = saved;
+      m.save = { ...saved, ...extra };
       if (saved.ok) {
         m.savedCopy = saved.savedCopy;
-        m.fileStatus = "Saved copy ready";
+        m.fileStatus = "saved";
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[scrape-post] save failed", m.id, message);
+      try {
+        await recordMediaSaveFailure({
+          mediaRecordId: m.id,
+          postRecordId: post.id,
+          message,
+        });
+      } catch (markErr) {
+        console.error("[scrape-post] failed to record save failure", markErr);
+      }
+      m.fileStatus = "failed";
+      m.save = { ok: false, error: message, ...extra };
+    }
+  };
+
+  if (saveMode === "async" && mediaOut.length) {
+    const jobs = mediaOut.map((m) => ({
+      mediaRecordId: m.id,
+      postRecordId: post.id,
+      fileUrl: m.fileLink,
+      mediaType: m.type,
+      force: Boolean(input.force),
+    }));
+    try {
+      const batch = await queueMediaSaves(jobs);
+      for (const m of mediaOut) {
+        m.fileStatus = "pending";
+        m.save = { queued: true, batch };
+        try {
+          await updateMedia(m.id, saveStatusFields("pending"));
+        } catch (markErr) {
+          console.error("[scrape-post] failed to mark pending", m.id, markErr);
+        }
+      }
+      await refreshPostSaveStatus(post.id, { saving: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn("[scrape-post] Trigger.dev queue failed; falling back to sync:", message);
+      saveMode = "sync";
+      for (const m of mediaOut) {
+        await saveOne(m, { fallbackFromAsync: true, queueError: message });
+      }
+      await refreshPostSaveStatus(post.id, { saving: true });
+    }
+  } else if (saveMode === "sync" && mediaOut.length) {
+    for (const m of mediaOut) {
+      await saveOne(m);
     }
     await refreshPostSaveStatus(post.id, { saving: true });
   } else if (hasMedia) {
@@ -272,6 +307,8 @@ export async function scrapePostPipeline(
     saving: saveMode === "async",
   });
 
+  await invalidateLibrary();
+
   return {
     ok: true,
     platform: normalized.platform,
@@ -279,7 +316,7 @@ export async function scrapePostPipeline(
       id: profile.id,
       handle: normalized.authorHandle,
       name: normalized.authorName,
-      avatar: normalized.authorAvatar,
+      avatar: avatar || undefined,
     },
     post: {
       id: post.id,

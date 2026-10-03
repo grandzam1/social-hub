@@ -59,12 +59,11 @@ try {
     body.hasAirtable &&
     body.hasR2 &&
     body.hasScrapeCreators &&
-    body.hasEventKey &&
-    body.hasSigningKey;
+    body.hasTrigger;
   record(
     "1. GET /health (all secrets)",
     ok,
-    `${ms}ms airtable=${body.hasAirtable} r2=${body.hasR2} sc=${body.hasScrapeCreators} inngest=${body.hasEventKey && body.hasSigningKey}`,
+    `${ms}ms airtable=${body.hasAirtable} r2=${body.hasR2} sc=${body.hasScrapeCreators} trigger=${body.hasTrigger}`,
   );
 } catch (e) {
   record("1. GET /health (all secrets)", false, e.message || e);

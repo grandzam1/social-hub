@@ -1,9 +1,28 @@
-import { getMedia, updateMedia } from "./airtable.js";
-import { downloadCdnUrl, guessExt, uploadToR2 } from "./r2.js";
+import {
+  getMedia,
+  getPost,
+  listMediaForPost,
+  updateMedia,
+  type AirtableRecord,
+} from "./airtable.js";
+import { transferCdnToR2, type DetectedMedia } from "./r2.js";
 import {
   refreshPostSaveStatus,
   resolvePostIdFromMedia,
 } from "./post-status.js";
+import { readSaveStatus, saveStatusFields } from "./save-status.js";
+import { invalidateLibrary } from "./library-cache.js";
+import {
+  detectPlatform,
+  scrapeInstagramPost,
+  scrapeTikTokVideo,
+  scrapeTwitterTweet,
+} from "./scrapecreators.js";
+import {
+  normalizeInstagram,
+  normalizeTikTok,
+  normalizeX,
+} from "./normalize.js";
 
 export type SaveMediaInput = {
   mediaRecordId: string;
@@ -12,6 +31,8 @@ export type SaveMediaInput = {
   objectKey?: string;
   mediaType?: string;
   force?: boolean;
+  /** Update only the media row. Leave the post record untouched. */
+  mediaOnly?: boolean;
 };
 
 export type SaveMediaResult =
@@ -43,15 +64,24 @@ export type SaveMediaResult =
 export async function saveMediaCdnToR2(
   input: SaveMediaInput,
 ): Promise<SaveMediaResult> {
-  const { mediaRecordId, postRecordId, fileUrl, objectKey, mediaType, force } =
-    input;
+  const {
+    mediaRecordId,
+    postRecordId,
+    fileUrl,
+    objectKey,
+    mediaType,
+    force,
+    mediaOnly,
+  } = input;
   if (!mediaRecordId) throw new Error("mediaRecordId required");
 
   const media = await getMedia(mediaRecordId);
   const existingSaved = String(media.fields["Saved copy"] ?? "");
-  const postId = await resolvePostIdFromMedia(mediaRecordId, postRecordId);
+  const postId = mediaOnly
+    ? undefined
+    : await resolvePostIdFromMedia(mediaRecordId, postRecordId);
 
-  if (existingSaved && !force) {
+  if (existingSaved && !force && readSaveStatus(media.fields) === "saved") {
     const postStatus = postId
       ? await refreshPostSaveStatus(postId, { saving: true })
       : undefined;
@@ -66,31 +96,59 @@ export async function saveMediaCdnToR2(
     };
   }
 
-  const cdnUrl = String(fileUrl || media.fields["File link"] || "");
+  let cdnUrl = String(fileUrl || media.fields["File link"] || "");
+  const storedUrl = cdnUrl;
+
+  if (mediaOnly) {
+    const fresh = await freshFileUrlForMedia(media);
+    if (fresh) cdnUrl = fresh;
+  }
   if (!cdnUrl) throw new Error(`No CDN File link on ${mediaRecordId}`);
 
-  if (postId) {
-    await refreshPostSaveStatus(postId, { saving: true });
+  let libraryChanged = false;
+  let uploaded;
+  let postStatus: { status: string; total: number; saved: number } | undefined;
+  try {
+    if (postId) {
+      await refreshPostSaveStatus(postId, { saving: true });
+      libraryChanged = true;
+    }
+
+    try {
+      uploaded = await transferCdnToR2({
+        url: cdnUrl,
+        objectKey,
+        mediaRecordId,
+        mediaType: mediaType || String(media.fields.Type ?? ""),
+      });
+    } catch (err) {
+      if (!mediaOnly || !isDeadCdn(err) || cdnUrl !== storedUrl) throw err;
+      const fresh = await freshFileUrlForMedia(media);
+      if (!fresh || fresh === cdnUrl) throw err;
+      cdnUrl = fresh;
+      uploaded = await transferCdnToR2({
+        url: fresh,
+        objectKey,
+        mediaRecordId,
+        mediaType: mediaType || String(media.fields.Type ?? ""),
+      });
+    }
+
+    await updateMedia(mediaRecordId, {
+      "Saved copy": uploaded.publicUrl,
+      ...(cdnUrl !== storedUrl ? { "File link": cdnUrl } : {}),
+      ...kindFields(uploaded),
+      ...saveStatusFields("saved"),
+      "Old file status": "stored",
+    });
+    libraryChanged = true;
+
+    postStatus = postId
+      ? await refreshPostSaveStatus(postId, { saving: true })
+      : undefined;
+  } finally {
+    if (libraryChanged) await invalidateLibrary();
   }
-
-  const { buffer, contentType } = await downloadCdnUrl(cdnUrl);
-  const ext = guessExt(contentType, mediaType);
-  const key = objectKey || `social-hub/${mediaRecordId}/${Date.now()}.${ext}`;
-  const uploaded = await uploadToR2({
-    key,
-    body: buffer,
-    contentType,
-  });
-
-  await updateMedia(mediaRecordId, {
-    "Saved copy": uploaded.publicUrl,
-    "File status": "Saved copy ready",
-    "Old file status": "stored",
-  });
-
-  const postStatus = postId
-    ? await refreshPostSaveStatus(postId, { saving: true })
-    : undefined;
 
   return {
     ok: true,
@@ -101,4 +159,177 @@ export async function saveMediaCdnToR2(
     key: uploaded.key,
     postStatus,
   };
+}
+
+function kindFields(uploaded: { kind: DetectedMedia["kind"]; fileType: string }) {
+  const type =
+    uploaded.kind === "gif" ? "gif" : uploaded.kind === "video" ? "video" : "image";
+  return { Type: type, "File type": uploaded.fileType };
+}
+
+function canonicalPostUrl(raw: string): string {
+  const url = raw.trim();
+  if (!url) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  parsed.search = "";
+  parsed.hash = "";
+  if (parsed.hostname.includes("instagram.com")) {
+    const match = parsed.pathname.match(/\/(p|reel|tv)\/([^/]+)/);
+    if (match) return `https://www.instagram.com/${match[1]}/${match[2]}/`;
+  }
+  return parsed.toString();
+}
+
+function isDeadCdn(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /CDN download failed (401|403|404|410|400)\b/.test(message);
+}
+
+async function scrapeFreshMedia(url: string) {
+  const platform = detectPlatform(url);
+  const raw = (
+    platform === "instagram"
+      ? await scrapeInstagramPost(url)
+      : platform === "tiktok"
+        ? await scrapeTikTokVideo(url)
+        : await scrapeTwitterTweet(url)
+  ) as Record<string, unknown>;
+  const normalized =
+    platform === "instagram"
+      ? normalizeInstagram(raw, url)
+      : platform === "tiktok"
+        ? normalizeTikTok(raw, url)
+        : normalizeX(raw, url);
+  return normalized.media;
+}
+
+function fileUrlAtOrder(
+  media: Array<{ order: number; fileUrl: string }>,
+  order: number,
+): string {
+  const match =
+    media.find((item) => item.order === order) ??
+    media[order] ??
+    (media.length === 1 ? media[0] : undefined);
+  return match?.fileUrl?.trim() || "";
+}
+
+/**
+ * Read a fresh platform file URL for this media row.
+ * Does not write the post, profile, or any other media row.
+ */
+async function freshFileUrlForMedia(
+  media: AirtableRecord,
+): Promise<string | undefined> {
+  const linked = media.fields.Post;
+  const postId = Array.isArray(linked) ? String(linked[0] ?? "") : "";
+  if (!postId) return undefined;
+  const post = await getPost(postId);
+  const url = canonicalPostUrl(String(post.fields.Link ?? "").trim());
+  if (!url) return undefined;
+  const fresh = await scrapeFreshMedia(url);
+  const order = Number(media.fields.Order ?? 0);
+  const fileUrl = fileUrlAtOrder(fresh, order);
+  if (!fileUrl) {
+    throw new Error(
+      `No file found for slide ${order + 1} on the original post`,
+    );
+  }
+  return fileUrl;
+}
+
+/**
+ * Save every unsaved slide on one post. Already-saved slides are left as they are.
+ * The post record is not written.
+ */
+export async function saveUnsavedMediaForPost(postRecordId: string): Promise<{
+  saved: Array<{ mediaRecordId: string; savedCopy: string }>;
+  failed: Array<{ mediaRecordId: string; error: string }>;
+  skipped: number;
+}> {
+  const post = await getPost(postRecordId);
+  const rows = await listMediaForPost(postRecordId);
+  const pending = rows.filter(
+    (row) => readSaveStatus(row.fields) !== "saved",
+  );
+  const skipped = rows.length - pending.length;
+  if (!pending.length) return { saved: [], failed: [], skipped };
+
+  const link = canonicalPostUrl(String(post.fields.Link ?? "").trim());
+  let fresh: Array<{ order: number; fileUrl: string }> = [];
+  if (link) {
+    try {
+      fresh = await scrapeFreshMedia(link);
+    } catch {
+      fresh = [];
+    }
+  }
+
+  const saved: Array<{ mediaRecordId: string; savedCopy: string }> = [];
+  const failed: Array<{ mediaRecordId: string; error: string }> = [];
+  for (const row of pending) {
+    const order = Number(row.fields.Order ?? 0);
+    const stored = String(row.fields["File link"] ?? "");
+    const freshUrl = fileUrlAtOrder(fresh, order);
+    const url = freshUrl || stored;
+    if (!url) {
+      failed.push({
+        mediaRecordId: row.id,
+        error: `No file found for slide ${order + 1}`,
+      });
+      continue;
+    }
+    try {
+      const uploaded = await transferCdnToR2({
+        url,
+        mediaRecordId: row.id,
+        mediaType: String(row.fields.Type ?? ""),
+      });
+      await updateMedia(row.id, {
+        "Saved copy": uploaded.publicUrl,
+        ...(url !== stored ? { "File link": url } : {}),
+        ...kindFields(uploaded),
+        ...saveStatusFields("saved"),
+        "Old file status": "stored",
+      });
+      saved.push({
+        mediaRecordId: row.id,
+        savedCopy: uploaded.publicUrl,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failed.push({
+        mediaRecordId: row.id,
+        error: message.replace(/\s+/g, " ").trim().slice(0, 180),
+      });
+    }
+  }
+
+  if (saved.length) await invalidateLibrary();
+
+  return { saved, failed, skipped };
+}
+
+/** Retries exhausted or the sync download threw. Parent post leaves Saving. */
+export async function recordMediaSaveFailure(input: {
+  mediaRecordId: string;
+  postRecordId?: string;
+  message: string;
+}): Promise<void> {
+  const message = input.message.replace(/\s+/g, " ").trim().slice(0, 180);
+  await updateMedia(input.mediaRecordId, {
+    ...saveStatusFields("failed"),
+    "Old file status": message || "save failed",
+  });
+  const postId = await resolvePostIdFromMedia(
+    input.mediaRecordId,
+    input.postRecordId,
+  );
+  if (postId) await refreshPostSaveStatus(postId);
+  await invalidateLibrary();
 }

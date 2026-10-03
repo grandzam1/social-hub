@@ -4,6 +4,9 @@ import {
   listProfiles,
   type AirtableRecord,
 } from "./airtable.js";
+import { readSaveStatus, type SaveStatus } from "./save-status.js";
+import { detectMediaKind, isHostedMediaUrl, type DetectedMedia } from "./r2.js";
+import { readLibrary, writeLibrary } from "./library-cache.js";
 
 export type ScrapKind = "text" | "image" | "video";
 
@@ -11,8 +14,11 @@ export type ScrapItem = {
   id: string;
   kind: ScrapKind;
   text?: string;
+  /** R2 URL when saveStatus is saved. Never a platform CDN link. */
   previewUrl?: string;
   fileUrl?: string;
+  savedCopy?: string;
+  saveStatus?: SaveStatus;
   user: string;
   avatarUrl?: string;
   platform?: string;
@@ -20,7 +26,6 @@ export type ScrapItem = {
   postRecordId?: string;
   mediaRecordId?: string;
   savedAt: string;
-  fileStatus?: string;
   order?: number;
 };
 
@@ -35,56 +40,59 @@ function asStr(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
 }
 
-function mediaKind(type: unknown): ScrapKind | null {
-  const t = String(type || "").toLowerCase();
-  if (t === "video" || t === "gif") return "video";
-  if (t === "image" || t === "photo") return "image";
-  return null;
+function scrapKind(detected: DetectedMedia): ScrapKind {
+  return detected.kind === "image" ? "image" : "video";
+}
+
+/** Saved file, then File type, then the Type label. */
+function mediaKind(fields: Record<string, unknown>): ScrapKind | null {
+  const saved = asStr(fields["Saved copy"]);
+  const fileType = asStr(fields["File type"]);
+  const claimed = asStr(fields.Type);
+  const detected =
+    (saved ? detectMediaKind({ url: saved }) : null) ||
+    (fileType ? detectMediaKind({ contentType: fileType }) : null) ||
+    (claimed ? detectMediaKind({ claimedType: claimed }) : null);
+  return detected ? scrapKind(detected) : null;
 }
 
 function preferUrl(...urls: Array<string | undefined>) {
   return urls.find((u) => u && /^https?:\/\//i.test(u));
 }
 
-function isLikelyVideoUrl(url?: string): boolean {
-  if (!url) return false;
-  return /\.(mp4|mov|webm|m4v|m3u8)(\?|#|$)/i.test(url);
-}
-
-function isLikelyImageUrl(url?: string): boolean {
-  if (!url || isLikelyVideoUrl(url)) return false;
-  if (/\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(url)) return true;
-  // CDN thumbs without extension (twimg, etc.) — treat as image unless clearly video
-  return true;
-}
-
 function profileAvatar(profile?: AirtableRecord): string | undefined {
   if (!profile) return undefined;
   const f = profile.fields;
-  return preferUrl(
+  const raw = preferUrl(
     asStr(f.Avatar),
     asStr(f.avatar),
     asStr(f["Profile image"]),
     asStr(f.Photo),
   );
+  if (raw && isHostedMediaUrl(raw)) return raw;
+  const handle = asStr(f.Handle);
+  const platform = asStr(f.Platform);
+  if (!raw || !handle || !platform) return undefined;
+  const qs = new URLSearchParams({ platform, handle });
+  return `/api/avatar?${qs}`;
 }
 
 function normalizeHandle(h: string): string {
   return h.replace(/^@/, "").trim().toLowerCase();
 }
 
-/**
- * Build a flat library of saved scraps from Posts + Media + Profiles.
- */
-export async function listScraps(filters?: {
-  type?: string;
-  user?: string;
-  q?: string;
-}): Promise<ScrapsResponse> {
+async function buildJoinedItems(): Promise<{
+  items: ScrapItem[];
+  cacheable: boolean;
+}> {
+  let profilesFailed = false;
   const [postsRes, mediaRes, profilesRes] = await Promise.all([
     listPosts(80),
     listMedia(100),
-    listProfiles(100).catch(() => ({ records: [] as AirtableRecord[] })),
+    listProfiles(100).catch(() => {
+      profilesFailed = true;
+      return { records: [] as AirtableRecord[] };
+    }),
   ]);
 
   const postsById = new Map<string, AirtableRecord>();
@@ -124,10 +132,11 @@ export async function listScraps(filters?: {
 
   for (const m of mediaRes.records) {
     const f = m.fields;
-    const kind = mediaKind(f.Type);
+    const postIds = Array.isArray(f.Post) ? (f.Post as string[]) : [];
+    if (!postIds[0]) continue;
+    const kind = mediaKind(f);
     if (!kind) continue;
 
-    const postIds = Array.isArray(f.Post) ? (f.Post as string[]) : [];
     const post = postIds[0] ? postsById.get(postIds[0]) : undefined;
     if (postIds[0]) postsWithMedia.add(postIds[0]);
 
@@ -136,26 +145,18 @@ export async function listScraps(filters?: {
       asStr(f.Label)?.split(" ")[0] ||
       "unknown";
     const platform = asStr(post?.fields.Platform);
-    const saved = asStr(f["Saved copy"]);
-    const preview = asStr(f["Preview link"]);
-    const fileLink = asStr(f["File link"]);
-    const fileUrl = preferUrl(saved, fileLink);
-    // Videos need an image poster — never reuse the mp4 as previewUrl.
-    const previewUrl =
-      kind === "video"
-        ? preferUrl(
-            isLikelyImageUrl(preview) ? preview : undefined,
-            isLikelyImageUrl(fileLink) ? fileLink : undefined,
-            isLikelyImageUrl(saved) ? saved : undefined,
-          )
-        : preferUrl(saved, preview, fileLink);
+    const saveStatus = readSaveStatus(f);
+    const savedCopy =
+      saveStatus === "saved" ? asStr(f["Saved copy"]) : undefined;
 
     items.push({
       id: `media:${m.id}`,
       kind,
       text: asStr(post?.fields.Text),
-      previewUrl,
-      fileUrl,
+      previewUrl: kind === "image" ? savedCopy : undefined,
+      fileUrl: savedCopy,
+      savedCopy,
+      saveStatus,
       user,
       avatarUrl: resolveAvatar(post, user, platform),
       platform,
@@ -167,7 +168,6 @@ export async function listScraps(filters?: {
         m.createdTime ||
         asStr(post?.createdTime) ||
         new Date().toISOString(),
-      fileStatus: asStr(f["File status"]),
       order: typeof f.Order === "number" ? f.Order : undefined,
     });
   }
@@ -195,6 +195,29 @@ export async function listScraps(filters?: {
   items.sort(
     (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime(),
   );
+
+  return { items, cacheable: !profilesFailed };
+}
+
+async function loadJoinedItems(): Promise<ScrapItem[]> {
+  const cached = await readLibrary<ScrapItem[]>();
+  if (Array.isArray(cached)) return cached;
+
+  const built = await buildJoinedItems();
+  if (built.cacheable) await writeLibrary(built.items);
+  return built.items;
+}
+
+/**
+ * Build a flat library of saved scraps from Posts + Media + Profiles.
+ * The KV snapshot is the unfiltered join. type, user, and q still filter here.
+ */
+export async function listScraps(filters?: {
+  type?: string;
+  user?: string;
+  q?: string;
+}): Promise<ScrapsResponse> {
+  const items = await loadJoinedItems();
 
   const type = (filters?.type || "all").toLowerCase();
   const user = (filters?.user || "").trim().toLowerCase();

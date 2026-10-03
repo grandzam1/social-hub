@@ -247,6 +247,46 @@ export async function listMediaForPost(
   );
 }
 
+export async function findPostLink(
+  handle: string,
+  platform: string,
+): Promise<string | undefined> {
+  const bare = handle.replace(/^@/, "").trim();
+  const variants = [...new Set([handle.trim(), bare, `@${bare}`].filter(Boolean))];
+  for (const variant of variants) {
+    const found = await findOne(
+      postsTable(),
+      `AND(${formulaEq("Author", variant)},${formulaEq("Platform", platform)})`,
+    );
+    const link = found?.fields.Link;
+    if (typeof link === "string" && link.trim()) return link.trim();
+  }
+  return undefined;
+}
+
+export async function findProfile(
+  handle: string,
+  platform: string,
+): Promise<AirtableRecord | null> {
+  const bare = handle.replace(/^@/, "").trim();
+  const variants = [...new Set([handle.trim(), bare, `@${bare}`].filter(Boolean))];
+  for (const variant of variants) {
+    const found = await findOne(
+      profilesTable(),
+      `AND(${formulaEq("Handle", variant)},${formulaEq("Platform", platform)})`,
+    );
+    if (found) return found;
+  }
+  return null;
+}
+
+export async function updateProfile(
+  recordId: string,
+  fields: Record<string, unknown>,
+): Promise<AirtableRecord> {
+  return patchRecord(profilesTable(), recordId, fields);
+}
+
 export async function upsertProfile(
   fields: Record<string, unknown>,
 ): Promise<AirtableRecord> {

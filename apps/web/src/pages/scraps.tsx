@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -25,6 +26,12 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ExpandableText } from "@/components/expandable-text";
 import { useMediaAutoplay } from "@/hooks/use-media-autoplay";
 import { displayHandle, fetchJson, fmtWhen, hiResAvatar } from "@/lib/api";
@@ -33,19 +40,23 @@ import { cn } from "@/lib/utils";
 
 type ScrapKind = "text" | "image" | "video";
 
+type SaveStatus = "pending" | "saved" | "failed";
+
 type ScrapItem = {
   id: string;
   kind: ScrapKind;
   text?: string;
   previewUrl?: string;
   fileUrl?: string;
+  savedCopy?: string;
+  saveStatus?: SaveStatus;
   user: string;
   avatarUrl?: string;
   platform?: string;
   postLink?: string;
   postRecordId?: string;
+  mediaRecordId?: string;
   savedAt: string;
-  fileStatus?: string;
   order?: number;
 };
 
@@ -93,8 +104,7 @@ function groupPosts(items: ScrapItem[]): ScrapPost[] {
     if (item.savedAt && (!g.savedAt || item.savedAt > g.savedAt)) {
       g.savedAt = item.savedAt;
     }
-    const hasFile = Boolean(item.fileUrl || item.previewUrl);
-    if (item.kind === "text" && !hasFile) continue;
+    if (item.kind === "text") continue;
     if (item.kind === "image" || item.kind === "video") {
       g.media.push(item);
     }
@@ -110,20 +120,99 @@ function groupPosts(items: ScrapItem[]): ScrapPost[] {
 }
 
 function statusBadge(post: ScrapPost) {
-  const statuses = post.media.map((m) => m.fileStatus).filter(Boolean);
-  if (statuses.some((s) => /saved copy ready/i.test(String(s)))) {
+  const statuses = post.media.map((m) => m.saveStatus).filter(Boolean);
+  if (statuses.length && statuses.every((s) => s === "saved")) {
     return { label: "Saved", tone: "default" as const };
   }
-  if (statuses.some((s) => /file link ready/i.test(String(s)))) {
-    return { label: "File link ready", tone: "secondary" as const };
+  if (statuses.some((s) => s === "failed")) {
+    return { label: "Failed", tone: "destructive" as const };
+  }
+  if (statuses.some((s) => s === "pending")) {
+    return { label: "Pending", tone: "secondary" as const };
   }
   if (post.media.length === 0) {
     return { label: "Text", tone: "outline" as const };
   }
   return {
-    label: statuses[0] || post.media[0]?.kind || "Media",
+    label: post.media[0]?.kind || "Media",
     tone: "outline" as const,
   };
+}
+
+function savedHref(item: ScrapItem) {
+  if (item.saveStatus !== "saved") return "";
+  return item.savedCopy || item.fileUrl || "";
+}
+
+function fileNameFromUrl(url: string, kind: ScrapKind) {
+  try {
+    const base = decodeURIComponent(
+      new URL(url).pathname.split("/").filter(Boolean).pop() || "",
+    );
+    if (base) return base;
+  } catch {
+    /* keep the fallback name */
+  }
+  return kind === "video" ? "video.mp4" : "image.jpg";
+}
+
+function mimeFor(name: string, kind: ScrapKind) {
+  const lower = name.toLowerCase();
+  if (kind === "video") {
+    if (lower.endsWith(".webm")) return "video/webm";
+    if (lower.endsWith(".mov")) return "video/quicktime";
+    return "video/mp4";
+  }
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/jpeg";
+}
+
+function triggerDownload(href: string, name: string) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  a.rel = "noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function saveMediaToDevice(url: string, kind: ScrapKind) {
+  const name = fileNameFromUrl(url, kind);
+  const endpoint = `/api/media/download?url=${encodeURIComponent(url)}`;
+  const canTryShare =
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function";
+  if (!canTryShare) {
+    triggerDownload(endpoint, name);
+    return;
+  }
+  const res = await fetch(endpoint);
+  if (!res.ok) throw new Error("Could not fetch media");
+  const blob = await res.blob();
+  const type =
+    blob.type && blob.type !== "application/octet-stream"
+      ? blob.type
+      : mimeFor(name, kind);
+  const file = new File([blob], name, { type });
+  const shareData = { files: [file], title: "Save media" };
+  if (navigator.canShare(shareData)) {
+    try {
+      await navigator.share(shareData);
+      return;
+    } catch (err) {
+      const canceled =
+        err instanceof DOMException &&
+        err.name === "AbortError" &&
+        /cancel/i.test(err.message);
+      if (canceled) throw err;
+    }
+  }
+  const objectUrl = URL.createObjectURL(blob);
+  triggerDownload(objectUrl, name);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
 }
 
 function KindTag({ kind }: { kind: ScrapKind }) {
@@ -138,93 +227,227 @@ function KindTag({ kind }: { kind: ScrapKind }) {
 function MediaSlide({
   item,
   className,
+  onRetry,
+  onOpen,
+  watch = false,
 }: {
   item: ScrapItem;
   className?: string;
+  onRetry?: (mediaRecordId: string) => void;
+  onOpen?: () => void;
+  watch?: boolean;
 }) {
-  const src = item.previewUrl || item.fileUrl || "";
-  const open = item.fileUrl || item.previewUrl || "";
+  const src = savedHref(item);
   const frame = cn(
     "relative flex h-full w-full items-center justify-center overflow-hidden bg-muted",
     className,
   );
+  const status = item.saveStatus || "pending";
 
-  if (!src) {
+  if (status === "failed") {
     return (
       <div className={frame}>
-        <span className="text-sm text-muted-foreground">
-          File link ready — waiting for saved copy
-        </span>
+        <div className="flex flex-col items-center gap-2 px-4 text-center">
+          <span className="text-sm text-muted-foreground">Save failed</span>
+          {item.mediaRecordId && onRetry ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="rounded-full"
+              onClick={() => onRetry(item.mediaRecordId!)}
+            >
+              Retry save
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (status !== "saved" || !src) {
+    return (
+      <div className={frame}>
+        <div className="flex flex-col items-center gap-2 px-4 text-center">
+          <span className="text-sm text-muted-foreground">
+            Waiting for saved copy
+          </span>
+          {item.mediaRecordId && onRetry ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="rounded-full"
+              onClick={() => onRetry(item.mediaRecordId!)}
+            >
+              Retry save
+            </Button>
+          ) : null}
+        </div>
       </div>
     );
   }
 
   if (item.kind === "video") {
-    const videoSrc =
-      item.fileUrl ||
-      (/\.(mp4|mov|webm|m4v|m3u8)(\?|#|$)/i.test(src) ? src : "") ||
-      "";
-    const poster =
-      item.previewUrl &&
-      !/\.(mp4|mov|webm|m4v|m3u8)(\?|#|$)/i.test(item.previewUrl)
-        ? item.previewUrl
-        : undefined;
-    if (!videoSrc) {
-      return (
-        <div className={frame}>
-          <span className="text-sm text-muted-foreground">
-            File link ready — waiting for saved copy
-          </span>
-        </div>
-      );
-    }
     return (
       <div className={frame}>
-        <video
-          className="max-h-full max-w-full object-contain"
-          data-media-video
-          data-force-controls="1"
-          playsInline
-          muted
-          preload="metadata"
-          controls
-          poster={poster}
-          src={videoSrc}
-        />
+          <video
+            className="max-h-full max-w-full object-contain"
+            {...(watch ? {} : { "data-media-video": "" })}
+            data-force-controls="1"
+            playsInline
+            muted={watch ? undefined : true}
+            preload="metadata"
+            controls
+            src={src}
+          />
         <KindTag kind="video" />
       </div>
     );
   }
 
-  const img = (
+  const image = (
     <img
       src={src}
       alt=""
       loading="lazy"
-      className="h-full w-full object-cover"
+      className={cn(
+        "h-full w-full",
+        watch ? "object-contain" : "object-cover",
+      )}
     />
   );
 
   return (
     <div className={frame}>
-      {open ? (
-        <a
-          href={open}
-          target="_blank"
-          rel="noreferrer"
-          className="block h-full w-full"
+      {onOpen && !watch ? (
+        <button
+          type="button"
+          className="block h-full w-full cursor-pointer"
+          aria-label="View media"
+          onClick={onOpen}
         >
-          {img}
-        </a>
+          {image}
+        </button>
       ) : (
-        img
+        image
       )}
       <KindTag kind="image" />
     </div>
   );
 }
 
-function MediaCarousel({ media }: { media: ScrapItem[] }) {
+function PostMenu({
+  post,
+  onView,
+  triggerClassName,
+  contentClassName,
+}: {
+  post: ScrapPost;
+  onView: () => void;
+  triggerClassName?: string;
+  contentClassName?: string;
+}) {
+  const triggerClass = cn(
+    "inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+    triggerClassName,
+  );
+
+  if (post.media.length === 0) {
+    return (
+      <span
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground/40"
+        aria-hidden
+      >
+        <MoreHorizontalIcon className="size-4" />
+      </span>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={triggerClass}
+        aria-label="Post actions"
+        title="Post actions"
+      >
+        <MoreHorizontalIcon className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className={cn("min-w-40", contentClassName)}>
+        <DropdownMenuItem
+          onSelect={() => {
+            onView();
+          }}
+        >
+          View media
+        </DropdownMenuItem>
+        {post.postLink ? (
+          <DropdownMenuItem asChild>
+            <a href={post.postLink} target="_blank" rel="noreferrer">
+              Open original
+            </a>
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SaveMediaButton({
+  item,
+  className,
+}: {
+  item: ScrapItem | undefined;
+  className?: string;
+}) {
+  const [label, setLabel] = useState("Save");
+  const [busy, setBusy] = useState(false);
+  const src = item ? savedHref(item) : "";
+
+  async function onClick() {
+    if (!item || !src || busy) return;
+    setBusy(true);
+    setLabel("Preparing…");
+    try {
+      await saveMediaToDevice(src, item.kind);
+      setLabel("Saved");
+      window.setTimeout(() => setLabel("Save"), 1400);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setLabel("Save");
+      } else {
+        setLabel("Try again");
+        window.setTimeout(() => setLabel("Save"), 1400);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className={cn("h-11 min-w-[4.5rem] rounded-full", className)}
+      disabled={!src || busy}
+      onClick={() => void onClick()}
+    >
+      {label}
+    </Button>
+  );
+}
+
+function MediaCarousel({
+  media,
+  onRetry,
+  onOpen,
+  onIndexChange,
+}: {
+  media: ScrapItem[];
+  onRetry?: (mediaRecordId: string) => void;
+  onOpen?: (index: number) => void;
+  onIndexChange?: (index: number) => void;
+}) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const count = media.length;
@@ -246,7 +469,8 @@ function MediaCarousel({ media }: { media: ScrapItem[] }) {
       }
     });
     setIndex(best);
-  }, []);
+    onIndexChange?.(best);
+  }, [onIndexChange]);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -295,6 +519,8 @@ function MediaCarousel({ media }: { media: ScrapItem[] }) {
               <MediaSlide
                 item={m}
                 className="aspect-[16/10] max-h-[22rem] sm:max-h-[26rem]"
+                onRetry={onRetry}
+                onOpen={onOpen ? () => onOpen(i) : undefined}
               />
             </div>
             {i === index ? (
@@ -352,15 +578,23 @@ function MediaCarousel({ media }: { media: ScrapItem[] }) {
   );
 }
 
-function ScrapCard({ post }: { post: ScrapPost }) {
+function ScrapCard({
+  post,
+  onRetry,
+  onView,
+}: {
+  post: ScrapPost;
+  onRetry?: (mediaRecordId: string) => void;
+  onView: (index: number) => void;
+}) {
   const caption = normalizeCaption(post.text);
   const badge = statusBadge(post);
+  const [slideIndex, setSlideIndex] = useState(0);
   const pills =
     post.media.length === 0
       ? ["text"]
-      : post.media.slice(0, 3).map((m) =>
-          m.fileStatus ? `${m.kind} · ${m.fileStatus}` : m.kind,
-        );
+      : post.media.slice(0, 3).map((m) => `${m.kind} · ${m.saveStatus || "pending"}`);
+  const current = post.media[Math.min(slideIndex, Math.max(post.media.length - 1, 0))];
 
   async function copyCaption() {
     if (!caption) return;
@@ -415,25 +649,7 @@ function ScrapCard({ post }: { post: ScrapPost }) {
           ) : null}
         </div>
 
-        {post.postLink ? (
-          <a
-            href={post.postLink}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label="Open original"
-            title="Open original"
-          >
-            <MoreHorizontalIcon className="size-4" />
-          </a>
-        ) : (
-          <span
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground/40"
-            aria-hidden
-          >
-            <MoreHorizontalIcon className="size-4" />
-          </span>
-        )}
+        <PostMenu post={post} onView={() => onView(slideIndex)} />
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3 px-4 py-0">
@@ -464,17 +680,24 @@ function ScrapCard({ post }: { post: ScrapPost }) {
             <MediaSlide
               item={post.media[0]}
               className="aspect-[16/10] max-h-[26rem]"
+              onRetry={onRetry}
+              onOpen={() => onView(0)}
             />
           </div>
         ) : (
-          <MediaCarousel media={post.media} />
+          <MediaCarousel
+            media={post.media}
+            onRetry={onRetry}
+            onOpen={onView}
+            onIndexChange={setSlideIndex}
+          />
         )}
       </CardContent>
 
       <CardFooter className="mt-auto flex items-center justify-between gap-3 border-t border-border/60 px-4 pt-3 pb-0">
         <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 font-mono text-[0.72rem]">
-          {pills.map((pill) => (
-            <span key={pill} className="text-muted-foreground">
+          {pills.map((pill, i) => (
+            <span key={`${pill}-${i}`} className="text-muted-foreground">
               {pill.includes(" · ") ? (
                 <>
                   <span className="text-foreground/85">
@@ -491,18 +714,114 @@ function ScrapCard({ post }: { post: ScrapPost }) {
             </span>
           ))}
         </div>
-        {post.postLink ? (
-          <a
-            href={post.postLink}
-            target="_blank"
-            rel="noreferrer"
-            className="shrink-0 text-sm font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Open original
-          </a>
-        ) : null}
+        {current ? <SaveMediaButton item={current} /> : null}
       </CardFooter>
     </Card>
+  );
+}
+
+function MediaView({
+  post,
+  index,
+  onIndex,
+  onClose,
+}: {
+  post: ScrapPost;
+  index: number;
+  onIndex: (index: number) => void;
+  onClose: () => void;
+}) {
+  const count = post.media.length;
+  const safeIndex = Math.max(0, Math.min(index, Math.max(count - 1, 0)));
+  const item = post.media[safeIndex];
+  const multi = count > 1;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  if (!item) return null;
+
+  function step(dir: -1 | 1) {
+    onIndex((safeIndex + dir + count) % count);
+  }
+
+  const controlClass =
+    "h-11 rounded-full border-white/25 bg-transparent text-[#f3ebe0] hover:bg-white/10 hover:text-[#f3ebe0]";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-[#120e0b] text-[#f3ebe0]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Media"
+    >
+      <header className="flex items-center gap-3 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+        <Button type="button" variant="outline" className={controlClass} onClick={onClose}>
+          Back
+        </Button>
+        <Avatar className="size-10 rounded-xl">
+          <AvatarImage src={hiResAvatar(post.avatarUrl)} alt="" className="rounded-xl" />
+          <AvatarFallback className="rounded-xl text-xs">
+            {displayHandle(post.user).slice(0, 2).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold">@{displayHandle(post.user)}</div>
+          {post.platform ? (
+            <div className="font-mono text-xs lowercase text-[#c9b8a0]">
+              {post.platform}
+            </div>
+          ) : null}
+        </div>
+        <PostMenu
+          post={post}
+          onView={() => onIndex(safeIndex)}
+          triggerClassName="text-[#f3ebe0] hover:bg-white/10 hover:text-[#f3ebe0]"
+          contentClassName="z-[70]"
+        />
+      </header>
+      <div className="flex min-h-0 flex-1 items-center justify-center px-3">
+        <MediaSlide
+          item={item}
+          watch
+          className="h-full max-h-[calc(100dvh-10.5rem)] w-full max-w-3xl bg-transparent"
+        />
+      </div>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-3 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]",
+          multi ? "justify-between" : "justify-center",
+        )}
+      >
+        {multi ? (
+          <Button type="button" variant="outline" className={controlClass} onClick={() => step(-1)}>
+            Previous
+          </Button>
+        ) : null}
+        {multi ? (
+          <span className="order-first w-full text-center font-mono text-xs text-[#c9b8a0] sm:order-none sm:w-auto">
+            {safeIndex + 1} / {count}
+          </span>
+        ) : null}
+        <SaveMediaButton item={item} className={controlClass} />
+        {multi ? (
+          <Button type="button" variant="outline" className={controlClass} onClick={() => step(1)}>
+            Next
+          </Button>
+        ) : null}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -566,6 +885,29 @@ export function ScrapsPage() {
   }, [error, load]);
 
   const posts = useMemo(() => groupPosts(items), [items]);
+  const [view, setView] = useState<{ key: string; index: number } | null>(null);
+  const viewPost = view ? posts.find((post) => post.key === view.key) ?? null : null;
+
+  const retrySave = useCallback(
+    async (mediaRecordId: string) => {
+      try {
+        await fetchJson("/api/media/save-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mediaRecordId,
+            mediaOnly: true,
+            force: true,
+          }),
+        });
+        toast.success("Saved to R2");
+        await load();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [load],
+  );
 
   return (
     <div ref={rootRef} className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -639,10 +981,23 @@ export function ScrapsPage() {
       ) : posts.length === 0 ? null : (
         <div className="flex flex-col gap-4">
           {posts.map((post) => (
-            <ScrapCard key={post.key} post={post} />
+            <ScrapCard
+              key={post.key}
+              post={post}
+              onRetry={(mediaRecordId) => void retrySave(mediaRecordId)}
+              onView={(index) => setView({ key: post.key, index })}
+            />
           ))}
         </div>
       )}
+      {view && viewPost ? (
+        <MediaView
+          post={viewPost}
+          index={view.index}
+          onIndex={(index) => setView({ key: viewPost.key, index })}
+          onClose={() => setView(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -2,12 +2,20 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync, existsSync } from "node:fs";
 import { Hono } from "hono";
-import { serve as serveInngest } from "inngest/hono";
-import { inngest } from "./inngest/client.js";
-import { functions } from "./inngest/functions.js";
-import { saveMediaCdnToR2 } from "./lib/save-media.js";
+import {
+  saveMediaCdnToR2,
+  saveUnsavedMediaForPost,
+} from "./lib/save-media.js";
+import { queueMediaSaves } from "./lib/queue-media-save.js";
 import { scrapePostPipeline } from "./lib/scrape-post.js";
 import { listScraps } from "./lib/scraps.js";
+import {
+  deleteLibraryCache,
+  isBustAuthorized,
+  type LibraryKv,
+} from "./lib/library-cache.js";
+import { ensureSavedAvatar } from "./lib/profile-avatar.js";
+import { isHostedMediaUrl } from "./lib/r2.js";
 import { listRecentPosts } from "./lib/recent-posts.js";
 import { getCreditBalance, getCreditUsage } from "./lib/scrapecreators.js";
 import {
@@ -19,6 +27,7 @@ import {
 
 export type WorkerBindings = {
   ASSETS?: Fetcher;
+  LIBRARY_KV?: LibraryKv;
   [key: string]: unknown;
 };
 
@@ -41,9 +50,7 @@ app.get("/health", (c) =>
   c.json({
     ok: true,
     service: "social-hub-api",
-    inngestDev: process.env.INNGEST_DEV === "1",
-    hasEventKey: Boolean(process.env.INNGEST_EVENT_KEY),
-    hasSigningKey: Boolean(process.env.INNGEST_SIGNING_KEY),
+    hasTrigger: Boolean(process.env.TRIGGER_SECRET_KEY),
     hasAirtable: Boolean(
       process.env.AIRTABLE_TOKEN || process.env.AIRTABLE_API_KEY,
     ),
@@ -56,27 +63,6 @@ app.get("/health", (c) =>
   }),
 );
 
-app.on(
-  ["GET", "PUT", "POST"],
-  "/api/inngest",
-  serveInngest({ client: inngest, functions }),
-);
-
-app.post("/demo/hello", async (c) => {
-  try {
-    const body = await c.req.json().catch(() => ({} as { who?: string }));
-    const ids = await inngest.send({
-      name: "social/hello",
-      data: { who: body.who ?? "WSL", at: new Date().toISOString() },
-    });
-    return c.json({ ok: true, ids });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[demo/hello]", message);
-    return c.json({ ok: false, error: message }, 500);
-  }
-});
-
 type SaveMediaBody = {
   mediaRecordId?: string;
   postRecordId?: string;
@@ -84,18 +70,18 @@ type SaveMediaBody = {
   objectKey?: string;
   mediaType?: string;
   force?: boolean;
+  mediaOnly?: boolean;
 };
 
-/** Async queue (needs Inngest Dev or Cloud). */
+/** Async queue on Trigger.dev. */
 app.post("/api/media/save", async (c) => {
   try {
     const body = (await c.req.json()) as SaveMediaBody;
     if (!body?.mediaRecordId) {
       return c.json({ ok: false, error: "mediaRecordId required" }, 400);
     }
-    const ids = await inngest.send({
-      name: "media/cdn.ready",
-      data: {
+    const batch = await queueMediaSaves([
+      {
         mediaRecordId: body.mediaRecordId,
         postRecordId: body.postRecordId,
         fileUrl: body.fileUrl,
@@ -103,12 +89,12 @@ app.post("/api/media/save", async (c) => {
         mediaType: body.mediaType,
         force: Boolean(body.force),
       },
-    });
+    ]);
     return c.json({
       ok: true,
       mode: "async",
-      event: "media/cdn.ready",
-      ids,
+      queue: "trigger",
+      batch,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -118,7 +104,7 @@ app.post("/api/media/save", async (c) => {
 });
 
 /**
- * Standalone sync — no Inngest required.
+ * Standalone sync.
  * Runs download → R2 → Airtable in this request.
  */
 app.post("/api/media/save-sync", async (c) => {
@@ -134,11 +120,30 @@ app.post("/api/media/save-sync", async (c) => {
       objectKey: body.objectKey,
       mediaType: body.mediaType,
       force: Boolean(body.force),
+      mediaOnly: Boolean(body.mediaOnly),
     });
     return c.json({ ok: true, mode: "sync", result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[api/media/save-sync]", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+/**
+ * Save every unsaved slide on one post. Saved slides and the post record stay as they are.
+ */
+app.post("/api/media/save-unsaved", async (c) => {
+  try {
+    const body = (await c.req.json()) as { postRecordId?: string };
+    if (!body?.postRecordId) {
+      return c.json({ ok: false, error: "postRecordId required" }, 400);
+    }
+    const result = await saveUnsavedMediaForPost(body.postRecordId);
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/media/save-unsaved]", message);
     return c.json({ ok: false, error: message }, 500);
   }
 });
@@ -426,6 +431,84 @@ app.get("/api/thumb", async (c) => {
   }
 });
 
+function downloadFileName(url: string): string {
+  const base = decodeURIComponent(
+    new URL(url).pathname.split("/").filter(Boolean).pop() || "media",
+  );
+  const safe = base.replace(/[^\w.\-]+/g, "_").slice(0, 120);
+  return safe || "media";
+}
+
+/** Same-origin file for the library Save button. Hosted copies only. */
+app.get("/api/media/download", async (c) => {
+  const rawUrl = c.req.query("url") || "";
+  if (!rawUrl) return c.text("url required", 400);
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return c.text("invalid url", 400);
+  }
+  if (parsed.protocol !== "https:") return c.text("invalid protocol", 400);
+  if (!isHostedMediaUrl(parsed.toString())) return c.text("host not allowed", 403);
+
+  try {
+    const upstream = await fetch(parsed.toString());
+    if (!upstream.ok || !upstream.body) {
+      return c.text(`download failed ${upstream.status}`, 502);
+    }
+    const name = downloadFileName(parsed.toString());
+    const headers = new Headers();
+    headers.set(
+      "Content-Type",
+      upstream.headers.get("content-type") || "application/octet-stream",
+    );
+    headers.set(
+      "Content-Disposition",
+      `attachment; filename="${name}"`,
+    );
+    const length = upstream.headers.get("content-length");
+    if (length) headers.set("Content-Length", length);
+    headers.set("Cache-Control", "private, max-age=3600");
+    return new Response(upstream.body, { status: 200, headers });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/media/download]", message);
+    return c.text("download failed", 500);
+  }
+});
+
+/** Saved profile image for a username. Reuses the stored copy. */
+app.get("/api/avatar", async (c) => {
+  const platform = c.req.query("platform") || "";
+  const handle = c.req.query("handle") || "";
+  if (!platform || !handle) return c.body(null, 400);
+  try {
+    const url = await ensureSavedAvatar(platform, handle);
+    if (!url) return c.body(null, 404);
+    return c.redirect(url, 302);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/avatar]", message);
+    return c.body(null, 404);
+  }
+});
+
+/** Drop the scraps library snapshot. Trigger.dev calls this after an async save. */
+app.post("/internal/library-cache/bust", async (c) => {
+  if (!isBustAuthorized(c.req.header("authorization"))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
+  try {
+    await deleteLibraryCache();
+    return c.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[library-cache] bust", message);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
 /** Saved Scraps library — Posts + Media from Airtable. */
 const scrapsInflight = new Map<
   string,
@@ -461,9 +544,8 @@ app.post("/demo/save-media", async (c) => {
     if (!body?.mediaRecordId) {
       return c.json({ ok: false, error: "mediaRecordId required" }, 400);
     }
-    const ids = await inngest.send({
-      name: "media/cdn.ready",
-      data: {
+    const batch = await queueMediaSaves([
+      {
         mediaRecordId: body.mediaRecordId,
         postRecordId: body.postRecordId,
         fileUrl: body.fileUrl,
@@ -471,8 +553,8 @@ app.post("/demo/save-media", async (c) => {
         mediaType: body.mediaType,
         force: Boolean(body.force),
       },
-    });
-    return c.json({ ok: true, ids, event: "media/cdn.ready" });
+    ]);
+    return c.json({ ok: true, queue: "trigger", batch });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[demo/save-media]", message);
