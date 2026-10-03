@@ -25,6 +25,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
@@ -179,24 +187,83 @@ function triggerDownload(href: string, name: string) {
   a.remove();
 }
 
-async function saveMediaToDevice(url: string, kind: ScrapKind) {
-  const name = fileNameFromUrl(url, kind);
-  const endpoint = `/api/media/download?url=${encodeURIComponent(url)}`;
-  const canTryShare =
-    typeof navigator.share === "function" &&
-    typeof navigator.canShare === "function";
-  if (!canTryShare) {
-    triggerDownload(endpoint, name);
-    return;
+/** Media already sent to the device during this visit. */
+const savedToDevice = new Set<string>();
+
+function mediaKey(item: ScrapItem, index: number) {
+  return item.mediaRecordId || item.id || String(index);
+}
+
+function uniqueFileName(name: string, used: Set<string>) {
+  if (!used.has(name)) {
+    used.add(name);
+    return name;
   }
-  const res = await fetch(endpoint);
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let n = 2;
+  let next = `${stem}-${n}${ext}`;
+  while (used.has(next)) {
+    n += 1;
+    next = `${stem}-${n}${ext}`;
+  }
+  used.add(next);
+  return next;
+}
+
+function canShareFiles() {
+  return (
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function"
+  );
+}
+
+/** Small files may be shared from memory. Videos and anything larger download to disk. */
+const MEMORY_SAVE_MAX_BYTES = 8 * 1024 * 1024;
+
+function downloadEndpoint(url: string) {
+  return `/api/media/download?url=${encodeURIComponent(url)}`;
+}
+
+async function hostedByteLength(url: string): Promise<number | null> {
+  try {
+    const res = await fetch(downloadEndpoint(url), { method: "HEAD" });
+    if (!res.ok) return null;
+    const raw = res.headers.get("content-length") || res.headers.get("x-media-bytes");
+    if (!raw) return null;
+    const bytes = Number(raw);
+    if (!Number.isFinite(bytes) || bytes < 0) return null;
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+function canLoadIntoMemory(kind: ScrapKind, bytes: number | null) {
+  if (kind === "video") return false;
+  if (bytes == null) return false;
+  return bytes <= MEMORY_SAVE_MAX_BYTES;
+}
+
+async function fileFromSavedUrl(url: string, kind: ScrapKind, name: string) {
+  const res = await fetch(downloadEndpoint(url));
   if (!res.ok) throw new Error("Could not fetch media");
   const blob = await res.blob();
   const type =
     blob.type && blob.type !== "application/octet-stream"
       ? blob.type
       : mimeFor(name, kind);
-  const file = new File([blob], name, { type });
+  return new File([blob], name, { type });
+}
+
+async function saveMediaToDevice(url: string, kind: ScrapKind) {
+  const name = fileNameFromUrl(url, kind);
+  if (!canShareFiles()) {
+    triggerDownload(downloadEndpoint(url), name);
+    return;
+  }
+  const file = await fileFromSavedUrl(url, kind, name);
   const shareData = { files: [file], title: "Save media" };
   if (navigator.canShare(shareData)) {
     try {
@@ -210,7 +277,7 @@ async function saveMediaToDevice(url: string, kind: ScrapKind) {
       if (canceled) throw err;
     }
   }
-  const objectUrl = URL.createObjectURL(blob);
+  const objectUrl = URL.createObjectURL(file);
   triggerDownload(objectUrl, name);
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
 }
@@ -393,23 +460,53 @@ function PostMenu({
   );
 }
 
+type SaveRow = {
+  id: string;
+  label: string;
+  detail: string;
+};
+
+function planSaveRows(media: ScrapItem[]): SaveRow[] {
+  const seenUrls = new Set<string>();
+  return media.map((item, index) => {
+    const src = savedHref(item);
+    const id = mediaKey(item, index);
+    const label = `${item.kind} ${index + 1}`;
+    if (!src) return { id, label, detail: "Not ready" };
+    const duplicate = seenUrls.has(src);
+    seenUrls.add(src);
+    if (savedToDevice.has(id) || duplicate) {
+      return { id, label, detail: "Already saved" };
+    }
+    return { id, label, detail: "Ready" };
+  });
+}
+
 function SaveMediaButton({
-  item,
+  media,
   className,
 }: {
-  item: ScrapItem | undefined;
+  media: ScrapItem[];
   className?: string;
 }) {
   const [label, setLabel] = useState("Save");
   const [busy, setBusy] = useState(false);
-  const src = item ? savedHref(item) : "";
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<SaveRow[]>([]);
+  const many = media.length > 1;
+  const single = media[0];
+  const singleSrc = single ? savedHref(single) : "";
+  const canSave = many
+    ? media.some((item) => Boolean(savedHref(item)))
+    : Boolean(singleSrc);
 
-  async function onClick() {
-    if (!item || !src || busy) return;
+  async function saveOne() {
+    if (!single || !singleSrc || busy) return;
     setBusy(true);
     setLabel("Preparing…");
     try {
-      await saveMediaToDevice(src, item.kind);
+      await saveMediaToDevice(singleSrc, single.kind);
+      savedToDevice.add(mediaKey(single, 0));
       setLabel("Saved");
       window.setTimeout(() => setLabel("Save"), 1400);
     } catch (err) {
@@ -424,16 +521,206 @@ function SaveMediaButton({
     }
   }
 
+  async function saveAll() {
+    if (busy) return;
+    const planned = planSaveRows(media);
+    const queue = planned
+      .map((row, index) => ({ row, item: media[index]! }))
+      .filter((entry) => entry.row.detail === "Ready");
+    if (!queue.length) return;
+
+    setBusy(true);
+    const names = new Set<string>();
+    let activeId = "";
+
+    const mark = (id: string, detail: string) => {
+      setRows((current) =>
+        current.map((row) => (row.id === id ? { ...row, detail } : row)),
+      );
+    };
+
+    try {
+      const shareable = canShareFiles();
+      const memoryQueue: typeof queue = [];
+      const diskQueue: typeof queue = [];
+      for (const entry of queue) {
+        const src = savedHref(entry.item);
+        if (!shareable || entry.item.kind === "video") {
+          diskQueue.push(entry);
+          continue;
+        }
+        const bytes = await hostedByteLength(src);
+        if (canLoadIntoMemory(entry.item.kind, bytes)) memoryQueue.push(entry);
+        else diskQueue.push(entry);
+      }
+      activeId = "";
+
+      for (const entry of diskQueue) {
+        const src = savedHref(entry.item);
+        const name = uniqueFileName(
+          fileNameFromUrl(src, entry.item.kind),
+          names,
+        );
+        mark(entry.row.id, "Saving…");
+        triggerDownload(downloadEndpoint(src), name);
+        savedToDevice.add(entry.row.id);
+        mark(entry.row.id, "Saved");
+      }
+
+      if (memoryQueue.length) {
+        const shareFiles: File[] = [];
+        const savedIds: string[] = [];
+        for (const entry of memoryQueue) {
+          activeId = entry.row.id;
+          mark(activeId, "Saving…");
+          const src = savedHref(entry.item);
+          const name = uniqueFileName(
+            fileNameFromUrl(src, entry.item.kind),
+            names,
+          );
+          shareFiles.push(await fileFromSavedUrl(src, entry.item.kind, name));
+          savedIds.push(entry.row.id);
+        }
+        activeId = "";
+        const shareData = { files: shareFiles, title: "Save media" };
+        let shared = false;
+        if (navigator.canShare?.(shareData)) {
+          try {
+            await navigator.share(shareData);
+            shared = true;
+          } catch (err) {
+            const canceled =
+              err instanceof DOMException && err.name === "AbortError";
+            if (canceled) throw err;
+          }
+        }
+        if (!shared) {
+          for (const file of shareFiles) {
+            const objectUrl = URL.createObjectURL(file);
+            triggerDownload(objectUrl, file.name);
+            window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+          }
+        }
+        for (const id of savedIds) {
+          savedToDevice.add(id);
+          mark(id, "Saved");
+        }
+      }
+    } catch (err) {
+      const canceled =
+        err instanceof DOMException && err.name === "AbortError";
+      setRows((current) =>
+        current.map((row) => {
+          if (!canceled && row.id === activeId) return { ...row, detail: "Failed" };
+          if (row.detail === "Saving…") return { ...row, detail: "Ready" };
+          return row;
+        }),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onClick() {
+    if (!canSave || busy) return;
+    if (many) {
+      setRows(planSaveRows(media));
+      setOpen(true);
+      return;
+    }
+    void saveOne();
+  }
+
+  const readyCount = rows.filter((row) => row.detail === "Ready").length;
+  const savedCount = rows.filter((row) => row.detail === "Saved").length;
+  const batchCount = rows.filter((row) =>
+    row.detail === "Ready" ||
+    row.detail === "Saving…" ||
+    row.detail === "Saved" ||
+    row.detail === "Failed",
+  ).length;
+  const finishedOrActive = rows.filter(
+    (row) => row.detail === "Saving…" || row.detail === "Saved",
+  ).length;
+  const progress = busy
+    ? `Saving ${Math.min(Math.max(finishedOrActive, 1), batchCount || media.length)} of ${batchCount || media.length}`
+    : savedCount
+      ? `Saved ${savedCount} of ${media.length}`
+      : `${media.length} files in this post`;
+
   return (
-    <Button
-      type="button"
-      variant="outline"
-      className={cn("h-11 min-w-[4.5rem] rounded-full", className)}
-      disabled={!src || busy}
-      onClick={() => void onClick()}
-    >
-      {label}
-    </Button>
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        className={cn("h-11 min-w-[4.5rem] rounded-full", className)}
+        disabled={!canSave || busy}
+        onClick={onClick}
+      >
+        {many ? "Save" : label}
+      </Button>
+      {many ? (
+        <Sheet
+          open={open}
+          onOpenChange={(next) => {
+            if (busy) return;
+            setOpen(next);
+          }}
+        >
+          <SheetContent
+            side="bottom"
+            overlayClassName="z-[80]"
+            className="z-[80] mx-auto max-h-[min(70dvh,32rem)] w-full max-w-md gap-0 overflow-hidden rounded-t-2xl border"
+          >
+            <SheetHeader>
+              <SheetTitle>Save all media?</SheetTitle>
+              <SheetDescription>
+                {progress}. Files already saved are skipped.
+              </SheetDescription>
+            </SheetHeader>
+            <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto px-4" aria-live="polite">
+              {rows.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 font-mono text-xs"
+                >
+                  <span className="capitalize text-foreground">{row.label}</span>
+                  <span
+                    className={cn(
+                      "text-muted-foreground",
+                      row.detail === "Saved" && "text-foreground",
+                      row.detail === "Failed" && "text-destructive",
+                      row.detail === "Saving…" && "text-foreground",
+                    )}
+                  >
+                    {row.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <SheetFooter className="flex-row justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                disabled={busy}
+                onClick={() => setOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="rounded-full"
+                disabled={busy || readyCount === 0}
+                onClick={() => void saveAll()}
+              >
+                {busy ? "Saving…" : "Save All"}
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
+      ) : null}
+    </>
   );
 }
 
@@ -594,7 +881,6 @@ function ScrapCard({
     post.media.length === 0
       ? ["text"]
       : post.media.slice(0, 3).map((m) => `${m.kind} · ${m.saveStatus || "pending"}`);
-  const current = post.media[Math.min(slideIndex, Math.max(post.media.length - 1, 0))];
 
   async function copyCaption() {
     if (!caption) return;
@@ -714,7 +1000,7 @@ function ScrapCard({
             </span>
           ))}
         </div>
-        {current ? <SaveMediaButton item={current} /> : null}
+        {post.media.length ? <SaveMediaButton media={post.media} /> : null}
       </CardFooter>
     </Card>
   );
@@ -813,7 +1099,7 @@ function MediaView({
             {safeIndex + 1} / {count}
           </span>
         ) : null}
-        <SaveMediaButton item={item} className={controlClass} />
+        <SaveMediaButton media={post.media} className={controlClass} />
         {multi ? (
           <Button type="button" variant="outline" className={controlClass} onClick={() => step(1)}>
             Next

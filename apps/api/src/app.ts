@@ -453,6 +453,39 @@ app.get("/api/media/download", async (c) => {
   if (!isHostedMediaUrl(parsed.toString())) return c.text("host not allowed", 403);
 
   try {
+    // Hono runs HEAD through this GET route, then drops the body. Do not fetch the file.
+    if (c.req.raw.method === "HEAD") {
+      const head = await fetch(parsed.toString(), { method: "HEAD" });
+      let length = head.headers.get("content-length");
+      let contentType = head.headers.get("content-type");
+      await head.body?.cancel();
+      if (!length) {
+        const probe = await fetch(parsed.toString(), {
+          headers: { Range: "bytes=0-0" },
+        });
+        const total = probe.headers.get("content-range")?.match(/\/(\d+)\s*$/)?.[1];
+        if (total) length = total;
+        if (!contentType) contentType = probe.headers.get("content-type");
+        await probe.body?.cancel();
+        if (!head.ok && !probe.ok && probe.status !== 206) {
+          return c.text(`download failed ${probe.status || head.status}`, 502);
+        }
+      } else if (!head.ok) {
+        return c.text(`download failed ${head.status}`, 502);
+      }
+      if (!length) return c.text("download failed", 502);
+      const headers = new Headers();
+      headers.set("Content-Type", contentType || "application/octet-stream");
+      headers.set(
+        "Content-Disposition",
+        `attachment; filename="${downloadFileName(parsed.toString())}"`,
+      );
+      headers.set("Content-Length", length);
+      headers.set("X-Media-Bytes", length);
+      headers.set("Cache-Control", "private, max-age=3600");
+      return new Response(null, { status: 200, headers });
+    }
+
     const upstream = await fetch(parsed.toString());
     if (!upstream.ok || !upstream.body) {
       return c.text(`download failed ${upstream.status}`, 502);
