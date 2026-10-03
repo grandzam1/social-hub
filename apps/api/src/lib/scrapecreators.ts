@@ -53,9 +53,19 @@ export function assertSinglePostUrl(url: string, platform: Platform) {
   }
 }
 
+/** Balance and charge history change on every call. Do not replay them from disk. */
+function isLiveAccountPath(path: string): boolean {
+  return (
+    path === "/v1/account/credit-balance" ||
+    path === "/v1/account/get-api-usage"
+  );
+}
+
 async function scGet(path: string, params: Record<string, string> = {}) {
   const mode = scMode();
-  const hit = mode === "live" ? null : readCached(path, params);
+  // Cache mode still fetches these live. Offline may replay a snapshot.
+  const skipDisk = isLiveAccountPath(path) && mode !== "offline";
+  const hit = mode === "live" || skipDisk ? null : readCached(path, params);
   if (hit) {
     if (process.env.SC_CACHE_LOG !== "0") {
       console.info(`[sc] ${hit.source} hit ${path} (${hit.key})`);
@@ -93,7 +103,7 @@ async function scGet(path: string, params: Record<string, string> = {}) {
       `ScrapeCreators ${path}: ${res.status} ${JSON.stringify(body).slice(0, 400)}`,
     );
   }
-  writeCached(path, params, body);
+  if (!isLiveAccountPath(path)) writeCached(path, params, body);
   return body;
 }
 
