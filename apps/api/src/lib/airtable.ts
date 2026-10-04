@@ -224,25 +224,20 @@ export async function listMediaForPost(
 ): Promise<AirtableRecord[]> {
   const post = await getPost(postRecordId);
   const linked = Array.isArray(post.fields.Files)
-    ? (post.fields.Files as string[])
+    ? (post.fields.Files as string[]).filter(Boolean)
     : [];
-  if (!linked.length) {
-    // Fallback: Media.Post link (older rows / partial writes)
-    const formula = `FIND('${postRecordId.replace(/'/g, "\\'")}', ARRAYJOIN({Post}))`;
-    const qs = new URLSearchParams({
-      filterByFormula: formula,
-      pageSize: "100",
-    });
-    const data = (await airtableFetch(`/${mediaTable()}?${qs}`)) as {
-      records: AirtableRecord[];
-    };
-    return [...data.records].sort(
-      (a, b) => Number(a.fields.Order ?? 0) - Number(b.fields.Order ?? 0),
-    );
-  }
-
-  const records = await Promise.all(linked.map((id) => getMedia(id)));
-  return records.sort(
+  // One media query for the whole carousel. One fetch per slide grows with the post.
+  const formula = linked.length
+    ? `OR(${linked.map((id) => `RECORD_ID()='${id.replace(/'/g, "\\'")}'`).join(",")})`
+    : `FIND('${postRecordId.replace(/'/g, "\\'")}', ARRAYJOIN({Post}))`;
+  const qs = new URLSearchParams({
+    filterByFormula: formula,
+    pageSize: "100",
+  });
+  const data = (await airtableFetch(`/${mediaTable()}?${qs}`)) as {
+    records: AirtableRecord[];
+  };
+  return [...data.records].sort(
     (a, b) => Number(a.fields.Order ?? 0) - Number(b.fields.Order ?? 0),
   );
 }

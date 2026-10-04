@@ -3,13 +3,10 @@ import {
   getPost,
   listMediaForPost,
   updateMedia,
+  updatePost,
   type AirtableRecord,
 } from "./airtable.js";
 import { transferCdnToR2, type DetectedMedia } from "./r2.js";
-import {
-  refreshPostSaveStatus,
-  resolvePostIdFromMedia,
-} from "./post-status.js";
 import { readSaveStatus, saveStatusFields } from "./save-status.js";
 import { invalidateLibrary } from "./library-cache.js";
 import {
@@ -66,7 +63,6 @@ export async function saveMediaCdnToR2(
 ): Promise<SaveMediaResult> {
   const {
     mediaRecordId,
-    postRecordId,
     fileUrl,
     objectKey,
     mediaType,
@@ -77,14 +73,8 @@ export async function saveMediaCdnToR2(
 
   const media = await getMedia(mediaRecordId);
   const existingSaved = String(media.fields["Saved copy"] ?? "");
-  const postId = mediaOnly
-    ? undefined
-    : await resolvePostIdFromMedia(mediaRecordId, postRecordId);
 
   if (existingSaved && !force && readSaveStatus(media.fields) === "saved") {
-    const postStatus = postId
-      ? await refreshPostSaveStatus(postId, { saving: true })
-      : undefined;
     return {
       ok: true,
       skipped: true,
@@ -92,7 +82,6 @@ export async function saveMediaCdnToR2(
       savedCopy: existingSaved,
       fileLink: media.fields["File link"],
       mediaRecordId,
-      postStatus,
     };
   }
 
@@ -107,13 +96,7 @@ export async function saveMediaCdnToR2(
 
   let libraryChanged = false;
   let uploaded;
-  let postStatus: { status: string; total: number; saved: number } | undefined;
   try {
-    if (postId) {
-      await refreshPostSaveStatus(postId, { saving: true });
-      libraryChanged = true;
-    }
-
     try {
       uploaded = await transferCdnToR2({
         url: cdnUrl,
@@ -142,10 +125,6 @@ export async function saveMediaCdnToR2(
       "Old file status": "stored",
     });
     libraryChanged = true;
-
-    postStatus = postId
-      ? await refreshPostSaveStatus(postId, { saving: true })
-      : undefined;
   } finally {
     if (libraryChanged) await invalidateLibrary();
   }
@@ -157,7 +136,6 @@ export async function saveMediaCdnToR2(
     savedCopy: uploaded.publicUrl,
     bytes: uploaded.bytes,
     key: uploaded.key,
-    postStatus,
   };
 }
 
@@ -245,7 +223,7 @@ async function freshFileUrlForMedia(
 
 /**
  * Save every unsaved slide on one post. Already-saved slides are left as they are.
- * The post record is not written.
+ * The post status is written once, after the slides.
  */
 export async function saveUnsavedMediaForPost(postRecordId: string): Promise<{
   saved: Array<{ mediaRecordId: string; savedCopy: string }>;
@@ -258,7 +236,10 @@ export async function saveUnsavedMediaForPost(postRecordId: string): Promise<{
     (row) => readSaveStatus(row.fields) !== "saved",
   );
   const skipped = rows.length - pending.length;
-  if (!pending.length) return { saved: [], failed: [], skipped };
+  if (!pending.length) {
+    if (rows.length) await updatePost(postRecordId, { Status: "Saved" });
+    return { saved: [], failed: [], skipped };
+  }
 
   const link = canonicalPostUrl(String(post.fields.Link ?? "").trim());
   let fresh: Array<{ order: number; fileUrl: string }> = [];
@@ -312,10 +293,15 @@ export async function saveUnsavedMediaForPost(postRecordId: string): Promise<{
 
   if (saved.length) await invalidateLibrary();
 
+  const allSaved = failed.length === 0 && saved.length + skipped === rows.length;
+  await updatePost(postRecordId, {
+    Status: allSaved ? "Saved" : "Partial",
+  });
+
   return { saved, failed, skipped };
 }
 
-/** Retries exhausted or the sync download threw. Parent post leaves Saving. */
+/** Marks one media row failed. The caller writes the parent post status. */
 export async function recordMediaSaveFailure(input: {
   mediaRecordId: string;
   postRecordId?: string;
@@ -326,10 +312,5 @@ export async function recordMediaSaveFailure(input: {
     ...saveStatusFields("failed"),
     "Old file status": message || "save failed",
   });
-  const postId = await resolvePostIdFromMedia(
-    input.mediaRecordId,
-    input.postRecordId,
-  );
-  if (postId) await refreshPostSaveStatus(postId);
   await invalidateLibrary();
 }

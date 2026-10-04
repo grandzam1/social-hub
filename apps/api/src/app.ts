@@ -131,7 +131,7 @@ app.post("/api/media/save-sync", async (c) => {
 });
 
 /**
- * Save every unsaved slide on one post. Saved slides and the post record stay as they are.
+ * Save every unsaved slide on one post, then set the post to Saved or Partial.
  */
 app.post("/api/media/save-unsaved", async (c) => {
   try {

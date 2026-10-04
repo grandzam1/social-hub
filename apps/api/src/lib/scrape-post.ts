@@ -1,6 +1,5 @@
 import {
   findProfile,
-  updateMedia,
   upsertMedia,
   upsertPost,
   upsertProfile,
@@ -19,7 +18,6 @@ import {
   normalizeX,
 } from "./normalize.js";
 import { recordMediaSaveFailure, saveMediaCdnToR2 } from "./save-media.js";
-import { refreshPostSaveStatus } from "./post-status.js";
 import { saveStatusFields } from "./save-status.js";
 import type { NormalizedScrape } from "./types.js";
 import { queueMediaSaves } from "./queue-media-save.js";
@@ -75,6 +73,8 @@ export type ScrapePostResult = {
     save?: unknown;
   }>;
   saveMode: "sync" | "async" | "none";
+  saved?: boolean;
+  reason?: "queue_failed";
   creditsCharged?: number;
   creditsRemaining?: number;
   cached?: boolean;
@@ -83,6 +83,8 @@ export type ScrapePostResult = {
 export async function scrapePostPipeline(
   input: ScrapePostInput,
 ): Promise<ScrapePostResult> {
+  // One request must make a small, fixed number of outbound calls.
+  // Anything that grows with slides or posts goes into a job.
   const url = String(input.url || "").trim();
   if (!url) throw new Error("url required");
 
@@ -265,6 +267,43 @@ export async function scrapePostPipeline(
     }
   };
 
+  let postStatus = hasMedia ? (saveToR2 ? "Saving" : "Scraped") : "No media";
+
+  const result = (
+    extra?: Pick<ScrapePostResult, "saved" | "reason">,
+  ): ScrapePostResult => ({
+    ok: true,
+    ...extra,
+    platform: normalized.platform,
+    profile: {
+      id: profile.id,
+      handle: normalized.authorHandle,
+      name: normalized.authorName,
+      avatar: avatar || undefined,
+    },
+    post: {
+      id: post.id,
+      postId: normalized.postId,
+      text: normalized.caption,
+      link: normalized.url,
+      status: postStatus,
+      postType: normalized.postType,
+      repostKind: normalized.repostKind,
+      quotedHandle: normalized.quotedHandle,
+      likes: normalized.likes,
+      comments: normalized.comments,
+      shares: normalized.shares,
+      views: normalized.views,
+      durationSec: normalized.durationSec,
+      mediaCount: mediaIds.length,
+    },
+    media: mediaOut.sort((a, b) => a.order - b.order),
+    saveMode,
+    creditsCharged: normalized.creditsCharged,
+    creditsRemaining: normalized.creditsRemaining,
+    cached: normalized.cached,
+  });
+
   if (saveMode === "async" && mediaOut.length) {
     const jobs = mediaOut.map((m) => ({
       mediaRecordId: m.id,
@@ -278,66 +317,25 @@ export async function scrapePostPipeline(
       for (const m of mediaOut) {
         m.fileStatus = "pending";
         m.save = { queued: true, batch };
-        try {
-          await updateMedia(m.id, saveStatusFields("pending"));
-        } catch (markErr) {
-          console.error("[scrape-post] failed to mark pending", m.id, markErr);
-        }
       }
-      await refreshPostSaveStatus(post.id, { saving: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn("[scrape-post] Trigger.dev queue failed; falling back to sync:", message);
-      saveMode = "sync";
-      for (const m of mediaOut) {
-        await saveOne(m, { fallbackFromAsync: true, queueError: message });
-      }
-      await refreshPostSaveStatus(post.id, { saving: true });
+      console.warn("[scrape-post] Trigger.dev queue failed:", message);
+      await updatePost(post.id, { Status: "Queue failed" });
+      postStatus = "Queue failed";
+      await invalidateLibrary();
+      return result({ saved: false, reason: "queue_failed" });
     }
   } else if (saveMode === "sync" && mediaOut.length) {
     for (const m of mediaOut) {
       await saveOne(m);
     }
-    await refreshPostSaveStatus(post.id, { saving: true });
-  } else if (hasMedia) {
-    await refreshPostSaveStatus(post.id);
+    const allSaved = mediaOut.every((m) => m.fileStatus === "saved");
+    postStatus = allSaved ? "Saved" : "Partial";
+    await updatePost(post.id, { Status: postStatus });
   }
-
-  const finalStatus = await refreshPostSaveStatus(post.id, {
-    saving: saveMode === "async",
-  });
 
   await invalidateLibrary();
 
-  return {
-    ok: true,
-    platform: normalized.platform,
-    profile: {
-      id: profile.id,
-      handle: normalized.authorHandle,
-      name: normalized.authorName,
-      avatar: avatar || undefined,
-    },
-    post: {
-      id: post.id,
-      postId: normalized.postId,
-      text: normalized.caption,
-      link: normalized.url,
-      status: finalStatus.status,
-      postType: normalized.postType,
-      repostKind: normalized.repostKind,
-      quotedHandle: normalized.quotedHandle,
-      likes: normalized.likes,
-      comments: normalized.comments,
-      shares: normalized.shares,
-      views: normalized.views,
-      durationSec: normalized.durationSec,
-      mediaCount: finalStatus.total,
-    },
-    media: mediaOut.sort((a, b) => a.order - b.order),
-    saveMode,
-    creditsCharged: normalized.creditsCharged,
-    creditsRemaining: normalized.creditsRemaining,
-    cached: normalized.cached,
-  };
+  return result();
 }

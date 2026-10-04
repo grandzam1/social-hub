@@ -6,7 +6,13 @@ import {
 } from "./airtable.js";
 import { readSaveStatus } from "./save-status.js";
 
-export type PostSaveStatus = "Scraped" | "Saving" | "Saved" | "No media" | "Failed";
+export type PostSaveStatus =
+  | "Scraped"
+  | "Saving"
+  | "Saved"
+  | "No media"
+  | "Partial"
+  | "Failed";
 
 function isSavedCopyReady(media: AirtableRecord): boolean {
   return readSaveStatus(media.fields) === "saved";
@@ -24,13 +30,13 @@ function isSavePending(media: AirtableRecord): boolean {
  * Parent Posts.Status reflects ALL child Media rows:
  * - No media → No media
  * - All saveStatus saved → Saved
- * - Any failed, and no save currently running → Failed
- * - A save is running, or some slides are already saved → Saving
+ * - Any slide still pending → Saving
+ * - Finished, but not all saved → Partial
  * - Otherwise Scraped
  */
 export async function refreshPostSaveStatus(
   postRecordId: string,
-  options?: { saving?: boolean },
+  _options?: { saving?: boolean },
 ): Promise<{ status: PostSaveStatus; total: number; saved: number }> {
   const items = await listMediaForPost(postRecordId);
   const total = items.length;
@@ -52,15 +58,12 @@ export async function refreshPostSaveStatus(
   if (saved === total) {
     status = "Saved";
     pipeline = "stored";
-  } else if (options?.saving && pending > 0) {
+  } else if (pending > 0) {
     status = "Saving";
     pipeline = "pending_media";
-  } else if (failed > 0) {
-    status = "Failed";
+  } else if (failed > 0 || saved > 0) {
+    status = "Partial";
     pipeline = "save_failed";
-  } else if (saved > 0) {
-    status = "Saving";
-    pipeline = "pending_media";
   } else {
     status = "Scraped";
     pipeline = "cdn_ready";
