@@ -1,17 +1,20 @@
-import { findPostLink, findProfile, updateProfile } from "./airtable.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog } from "../catalog/index.js";
+import { getScraper } from "../platforms/index.js";
 import { invalidateLibrary } from "./library-cache.js";
-import {
-  detectPlatform,
-  scrapeInstagramPost,
-  scrapeTikTokVideo,
-  scrapeTwitterTweet,
-} from "./scrapecreators.js";
-import {
-  normalizeInstagram,
-  normalizeTikTok,
-  normalizeX,
-} from "./normalize.js";
 import { isHostedMediaUrl, transferCdnToR2 } from "./r2.js";
+
+async function findPostLink(handle: string, platform: string) {
+  return (await getCatalog(connectionsEnv())).findPostLink(handle, platform);
+}
+
+async function findProfile(handle: string, platform: string) {
+  return (await getCatalog(connectionsEnv())).findProfile(handle, platform);
+}
+
+async function updateProfile(recordId: string, fields: Record<string, unknown>) {
+  return (await getCatalog(connectionsEnv())).updateProfile(recordId, fields);
+}
 
 const failed = new Set<string>();
 const inflight = new Map<string, Promise<string | null>>();
@@ -71,20 +74,8 @@ async function avatarFromExistingPost(
 ): Promise<string> {
   const link = await findPostLink(handle, platform);
   if (!link) return "";
-  const detected = detectPlatform(link);
-  const raw = (
-    detected === "instagram"
-      ? await scrapeInstagramPost(link)
-      : detected === "tiktok"
-        ? await scrapeTikTokVideo(link)
-        : await scrapeTwitterTweet(link)
-  ) as Record<string, unknown>;
-  const normalized =
-    detected === "instagram"
-      ? normalizeInstagram(raw, link)
-      : detected === "tiktok"
-        ? normalizeTikTok(raw, link)
-        : normalizeX(raw, link);
+  const scraper = await getScraper(connectionsEnv());
+  const normalized = await scraper.fetchPost(link);
   return normalized.authorAvatar?.trim() || "";
 }
 

@@ -1,22 +1,6 @@
-import {
-  findProfile,
-  upsertMedia,
-  upsertPost,
-  upsertProfile,
-  updatePost,
-} from "./airtable.js";
-import {
-  detectPlatform,
-  assertSinglePostUrl,
-  scrapeInstagramPost,
-  scrapeTikTokVideo,
-  scrapeTwitterTweet,
-} from "./scrapecreators.js";
-import {
-  normalizeInstagram,
-  normalizeTikTok,
-  normalizeX,
-} from "./normalize.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog } from "../catalog/index.js";
+import { getScraper } from "../platforms/index.js";
 import { recordMediaSaveFailure, saveMediaCdnToR2 } from "./save-media.js";
 import { saveStatusFields } from "./save-status.js";
 import type { NormalizedScrape } from "./types.js";
@@ -24,6 +8,30 @@ import { queueMediaSaves } from "./queue-media-save.js";
 import { isHostedMediaUrl } from "./r2.js";
 import { saveAvatarToR2 } from "./profile-avatar.js";
 import { invalidateLibrary } from "./library-cache.js";
+
+async function catalog() {
+  return getCatalog(connectionsEnv());
+}
+
+async function findProfile(handle: string, platform: string) {
+  return (await catalog()).findProfile(handle, platform);
+}
+
+async function upsertProfile(fields: Record<string, unknown>) {
+  return (await catalog()).upsertProfile(fields);
+}
+
+async function upsertPost(fields: Record<string, unknown>) {
+  return (await catalog()).upsertPost(fields);
+}
+
+async function upsertMedia(fields: Record<string, unknown>) {
+  return (await catalog()).upsertMedia(fields);
+}
+
+async function updatePost(recordId: string, fields: Record<string, unknown>) {
+  return (await catalog()).updatePost(recordId, fields);
+}
 
 export type ScrapePostInput = {
   url: string;
@@ -88,21 +96,8 @@ export async function scrapePostPipeline(
   const url = String(input.url || "").trim();
   if (!url) throw new Error("url required");
 
-  const platform = detectPlatform(url);
-  assertSinglePostUrl(url, platform);
-  let raw: Record<string, unknown>;
-  let normalized: NormalizedScrape;
-
-  if (platform === "instagram") {
-    raw = await scrapeInstagramPost(url);
-    normalized = normalizeInstagram(raw, url);
-  } else if (platform === "tiktok") {
-    raw = await scrapeTikTokVideo(url);
-    normalized = normalizeTikTok(raw, url);
-  } else {
-    raw = await scrapeTwitterTweet(url);
-    normalized = normalizeX(raw, url);
-  }
+  const scraper = await getScraper(connectionsEnv());
+  const normalized = await scraper.fetchPost(url);
 
   // Ensure stable 0..n-1 order even if a normalizer gaps
   normalized.media = [...normalized.media]
@@ -176,7 +171,7 @@ export async function scrapePostPipeline(
     "Has media": hasMedia,
     Cover: normalized.cover,
     Profile: [profile.id],
-    "Post scraper": "scrapecreators",
+    "Post scraper": scraper.name,
     Status: hasMedia ? (saveToR2 ? "Saving" : "Scraped") : "No media",
     "Old pipeline": hasMedia
       ? saveToR2
@@ -203,7 +198,7 @@ export async function scrapePostPipeline(
       Height: asset.height,
       "Duration ms": asset.durationMs,
       "File type": asset.fileType,
-      "File scraper": "scrapecreators",
+      "File scraper": scraper.name,
       ...saveStatusFields("pending"),
       "Old file status": "cdn_ready",
       Label: `${normalized.platform} slide ${asset.order}`,

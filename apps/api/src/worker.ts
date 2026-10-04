@@ -1,4 +1,5 @@
 import { createApp, type WorkerBindings } from "./app.js";
+import { setConnectionsEnv } from "./connections/runtime.js";
 import { setLibraryKv, type LibraryKv } from "./lib/library-cache.js";
 
 export { SaveMediaWorkflow } from "./workflows/save-media.js";
@@ -22,6 +23,7 @@ export default {
     process.env.RUNTIME = "cloudflare";
     process.env.SC_MODE = process.env.SC_MODE || "live";
     process.env.SC_CACHE_WRITE = "0";
+    setConnectionsEnv(env);
     setLibraryKv(
       env.LIBRARY_KV && typeof env.LIBRARY_KV === "object"
         ? (env.LIBRARY_KV as LibraryKv)

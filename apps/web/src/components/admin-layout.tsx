@@ -8,6 +8,7 @@ const titles: Record<string, string> = {
   "/batch": "Batch",
   "/scraps": "Saved scraps",
   "/usage": "Usage",
+  "/connections": "Connections",
   "/settings": "Settings",
   "/docs": "API docs",
 };

@@ -1,3 +1,5 @@
+import { getConnection } from "../connections/index.js";
+import { connectionsEnv } from "../connections/runtime.js";
 import type { Platform } from "./types.js";
 import {
   readCached,
@@ -12,7 +14,19 @@ function required(name: string): string {
   return value;
 }
 
-function apiKey() {
+async function apiKey(): Promise<string> {
+  const env = connectionsEnv();
+  if (env.DB) {
+    try {
+      const stored = await getConnection(env, "social-hub", "scrapecreators");
+      if (stored) return stored;
+    } catch (err) {
+      console.warn(
+        "[sc] stored scrapecreators key unavailable; using env",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
   return required("SCRAPECREATORS_API_KEY");
 }
 
@@ -90,7 +104,7 @@ async function scGet(path: string, params: Record<string, string> = {}) {
   const url = qs
     ? `https://api.scrapecreators.com${path}?${qs}`
     : `https://api.scrapecreators.com${path}`;
-  const res = await fetch(url, { headers: { "x-api-key": apiKey() } });
+  const res = await fetch(url, { headers: { "x-api-key": await apiKey() } });
   const text = await res.text();
   let body: unknown;
   try {

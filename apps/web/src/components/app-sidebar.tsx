@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
   ActivityIcon,
   BookOpenIcon,
+  KeyRoundIcon,
   DownloadIcon,
   LayersIcon,
   Link2Icon,
@@ -26,6 +27,7 @@ const nav = [
   { title: "Batch", href: "/batch", icon: DownloadIcon },
   { title: "Scraps", href: "/scraps", icon: LayersIcon },
   { title: "Usage", href: "/usage", icon: ActivityIcon },
+  { title: "Connections", href: "/connections", icon: KeyRoundIcon },
   { title: "API docs", href: "/docs", icon: BookOpenIcon },
   { title: "Settings", href: "/settings", icon: SettingsIcon },
 ];

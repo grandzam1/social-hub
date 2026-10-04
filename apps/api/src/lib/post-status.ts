@@ -1,10 +1,22 @@
-import {
-  getMedia,
-  listMediaForPost,
-  updatePost,
-  type AirtableRecord,
-} from "./airtable.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog, type AirtableRecord } from "../catalog/index.js";
 import { readSaveStatus } from "./save-status.js";
+
+async function catalog() {
+  return getCatalog(connectionsEnv());
+}
+
+async function getMedia(recordId: string) {
+  return (await catalog()).getMedia(recordId);
+}
+
+async function listMediaForPost(postRecordId: string) {
+  return (await catalog()).listMediaForPost(postRecordId);
+}
+
+async function updatePost(recordId: string, fields: Record<string, unknown>) {
+  return (await catalog()).updatePost(recordId, fields);
+}
 
 export type PostSaveStatus =
   | "Scraped"

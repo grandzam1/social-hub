@@ -16,18 +16,25 @@ import {
 } from "./lib/library-cache.js";
 import { ensureSavedAvatar } from "./lib/profile-avatar.js";
 import { isHostedMediaUrl } from "./lib/r2.js";
+import { connectionsEnv } from "./connections/runtime.js";
+import { getScraper } from "./platforms/index.js";
 import { listRecentPosts } from "./lib/recent-posts.js";
-import { getCreditBalance, getCreditUsage } from "./lib/scrapecreators.js";
+import { getCreditUsage } from "./lib/scrapecreators.js";
 import {
   listUsageEvents,
   recordScrapeCreatorsCreditSnapshot,
   summarizeUsageEvents,
   usageTrackingConfigured,
 } from "./lib/usage.js";
+import { connectionsRoutes } from "./http/routes/connections.js";
+import { vaultRoutes } from "./http/routes/vault.js";
+import type { ConnectionsDb } from "./connections/index.js";
 
 export type WorkerBindings = {
   ASSETS?: Fetcher;
   LIBRARY_KV?: LibraryKv;
+  DB?: ConnectionsDb;
+  MASTER_KEY?: string;
   [key: string]: unknown;
 };
 
@@ -42,9 +49,18 @@ function getPublicDir(): string | null {
   }
 }
 
+async function providerCreditBalance(): Promise<number | null> {
+  const scraper = await getScraper(connectionsEnv());
+  if (!scraper.getCredits) return null;
+  const { remaining } = await scraper.getCredits();
+  return remaining;
+}
+
 export function createApp() {
   const app = new Hono<AppEnv>();
   const publicDir = getPublicDir();
+  app.route("/api/connections", connectionsRoutes);
+  app.route("/api/vault", vaultRoutes);
 
 app.get("/health", (c) =>
   c.json({
@@ -179,8 +195,8 @@ app.post("/api/scrape-post", async (c) => {
 /** ScrapeCreators credit balance + recent charge history. */
 app.get("/api/credits", async (c) => {
   try {
-    const remaining = await getCreditBalance();
-    recordScrapeCreatorsCreditSnapshot(remaining);
+    const remaining = await providerCreditBalance();
+    if (remaining != null) recordScrapeCreatorsCreditSnapshot(remaining);
     return c.json({ ok: true, remaining });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -196,7 +212,7 @@ app.get("/api/credits/history", async (c) => {
     let remaining: number | null = null;
     let warning: string | undefined;
     try {
-      remaining = await getCreditBalance();
+      remaining = await providerCreditBalance();
       if (remaining != null) recordScrapeCreatorsCreditSnapshot(remaining);
     } catch (err) {
       warning = err instanceof Error ? err.message : String(err);
@@ -235,7 +251,7 @@ app.get("/api/usage", async (c) => {
     let creditsUsed: number | null = null;
     let creditsWarning: string | undefined;
     try {
-      creditsRemaining = await getCreditBalance();
+      creditsRemaining = await providerCreditBalance();
       if (creditsRemaining != null) {
         recordScrapeCreatorsCreditSnapshot(creditsRemaining);
       }

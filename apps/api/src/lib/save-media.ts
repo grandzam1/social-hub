@@ -1,25 +1,33 @@
-import {
-  getMedia,
-  getPost,
-  listMediaForPost,
-  updateMedia,
-  updatePost,
-  type AirtableRecord,
-} from "./airtable.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog, type AirtableRecord } from "../catalog/index.js";
+import { getScraper } from "../platforms/index.js";
 import { transferCdnToR2, type DetectedMedia } from "./r2.js";
 import { readSaveStatus, saveStatusFields } from "./save-status.js";
 import { invalidateLibrary } from "./library-cache.js";
-import {
-  detectPlatform,
-  scrapeInstagramPost,
-  scrapeTikTokVideo,
-  scrapeTwitterTweet,
-} from "./scrapecreators.js";
-import {
-  normalizeInstagram,
-  normalizeTikTok,
-  normalizeX,
-} from "./normalize.js";
+
+async function catalog() {
+  return getCatalog(connectionsEnv());
+}
+
+async function getMedia(recordId: string) {
+  return (await catalog()).getMedia(recordId);
+}
+
+async function getPost(recordId: string) {
+  return (await catalog()).getPost(recordId);
+}
+
+async function listMediaForPost(postRecordId: string) {
+  return (await catalog()).listMediaForPost(postRecordId);
+}
+
+async function updateMedia(recordId: string, fields: Record<string, unknown>) {
+  return (await catalog()).updateMedia(recordId, fields);
+}
+
+async function updatePost(recordId: string, fields: Record<string, unknown>) {
+  return (await catalog()).updatePost(recordId, fields);
+}
 
 export type SaveMediaInput = {
   mediaRecordId: string;
@@ -169,20 +177,8 @@ function isDeadCdn(err: unknown): boolean {
 }
 
 async function scrapeFreshMedia(url: string) {
-  const platform = detectPlatform(url);
-  const raw = (
-    platform === "instagram"
-      ? await scrapeInstagramPost(url)
-      : platform === "tiktok"
-        ? await scrapeTikTokVideo(url)
-        : await scrapeTwitterTweet(url)
-  ) as Record<string, unknown>;
-  const normalized =
-    platform === "instagram"
-      ? normalizeInstagram(raw, url)
-      : platform === "tiktok"
-        ? normalizeTikTok(raw, url)
-        : normalizeX(raw, url);
+  const scraper = await getScraper(connectionsEnv());
+  const normalized = await scraper.fetchPost(url);
   return normalized.media;
 }
 

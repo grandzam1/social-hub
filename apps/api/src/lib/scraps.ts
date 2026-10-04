@@ -1,12 +1,20 @@
-import {
-  listMedia,
-  listPosts,
-  listProfiles,
-  type AirtableRecord,
-} from "./airtable.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog, type AirtableRecord } from "../catalog/index.js";
 import { readSaveStatus, type SaveStatus } from "./save-status.js";
 import { detectMediaKind, isHostedMediaUrl, type DetectedMedia } from "./r2.js";
 import { readLibrary, writeLibrary } from "./library-cache.js";
+
+async function listPosts(pageSize?: number) {
+  return (await getCatalog(connectionsEnv())).listPosts(pageSize);
+}
+
+async function listMedia(pageSize?: number) {
+  return (await getCatalog(connectionsEnv())).listMedia(pageSize);
+}
+
+async function listProfiles(pageSize?: number) {
+  return (await getCatalog(connectionsEnv())).listProfiles(pageSize);
+}
 
 export type ScrapKind = "text" | "image" | "video";
 

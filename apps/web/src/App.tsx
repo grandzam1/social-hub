@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AdminLayout } from "@/components/admin-layout";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ConnectionsPage } from "@/features/connections/connections-page";
 import { BatchPage } from "@/pages/batch";
 import { DocsPage } from "@/pages/docs";
 import { PullPage } from "@/pages/pull";
@@ -23,6 +24,7 @@ export default function App() {
               <Route path="batch" element={<BatchPage />} />
               <Route path="scraps" element={<ScrapsPage />} />
               <Route path="usage" element={<UsagePage />} />
+              <Route path="connections" element={<ConnectionsPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="docs" element={<DocsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

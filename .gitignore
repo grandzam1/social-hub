@@ -10,4 +10,6 @@ dist/
 apps/api/public/admin/
 .trigger
 .wrangler/
+.dev.vars
 scripts/.e2e-cloud-last.json
+backups/
