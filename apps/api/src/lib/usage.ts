@@ -52,10 +52,19 @@ export function shouldSkipAirtableUsageTracking(path: string): boolean {
   return isUsageTablePath(path);
 }
 
-async function writeUsageEvent(fields: Record<string, unknown>): Promise<void> {
+const USAGE_BATCH_SIZE = 10;
+/** Quiet period before a short remainder is sent. Full groups of 10 go immediately. */
+const USAGE_BATCH_DELAY_MS = 1500;
+
+let usageQueue: Record<string, unknown>[] = [];
+let usageTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function writeUsageBatch(
+  records: Record<string, unknown>[],
+): Promise<void> {
   const table = usageTableId();
   const auth = token();
-  if (!table || !auth) return;
+  if (!table || !auth || !records.length) return;
 
   const url = `https://api.airtable.com/v0/${baseId()}/${table}`;
   const res = await fetch(url, {
@@ -64,7 +73,10 @@ async function writeUsageEvent(fields: Record<string, unknown>): Promise<void> {
       Authorization: `Bearer ${auth}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ fields, typecast: true }),
+    body: JSON.stringify({
+      records: records.map((fields) => ({ fields })),
+      typecast: true,
+    }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
@@ -73,6 +85,32 @@ async function writeUsageEvent(fields: Record<string, unknown>): Promise<void> {
       `[usage] write failed ${res.status}: ${body.slice(0, 200)}`,
     );
   }
+}
+
+function sendUsageBatch(records: Record<string, unknown>[]) {
+  void writeUsageBatch(records).catch((err) => {
+    console.warn("[usage] write error", err instanceof Error ? err.message : err);
+  });
+}
+
+function flushUsageQueue() {
+  usageTimer = undefined;
+  while (usageQueue.length) {
+    sendUsageBatch(usageQueue.splice(0, USAGE_BATCH_SIZE));
+  }
+}
+
+function enqueueUsageRecord(fields: Record<string, unknown>) {
+  usageQueue.push(fields);
+  while (usageQueue.length >= USAGE_BATCH_SIZE) {
+    sendUsageBatch(usageQueue.splice(0, USAGE_BATCH_SIZE));
+  }
+  if (usageTimer) clearTimeout(usageTimer);
+  if (!usageQueue.length) {
+    usageTimer = undefined;
+    return;
+  }
+  usageTimer = setTimeout(flushUsageQueue, USAGE_BATCH_DELAY_MS);
 }
 
 /** Fire-and-forget append. Safe to call from hot paths. */
@@ -95,9 +133,7 @@ export function recordUsageEvent(input: UsageEventInput): void {
   }
   if (input.detail) fields.Detail = input.detail.slice(0, 1000);
 
-  void writeUsageEvent(fields).catch((err) => {
-    console.warn("[usage] write error", err instanceof Error ? err.message : err);
-  });
+  enqueueUsageRecord(fields);
 }
 
 export function recordAirtableRequest(opts: {
