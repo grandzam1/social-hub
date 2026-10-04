@@ -9,3 +9,5 @@ dist/
 .specstory/
 apps/api/public/admin/
 .trigger
+.wrangler/
+scripts/.e2e-cloud-last.json
