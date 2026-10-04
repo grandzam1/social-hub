@@ -31,6 +31,8 @@ const names = [
   "AIRTABLE_USAGE_EVENTS_TABLE",
   "LIBRARY_BUST_URL",
   "LIBRARY_BUST_SECRET",
+  "SUPABASE_URL",
+  "SUPABASE_SECRET_KEY",
 ];
 const variables = {};
 for (const name of names) {

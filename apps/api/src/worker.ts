@@ -31,6 +31,29 @@ export default {
     );
 
     const app = createApp();
-    return app.fetch(request, env);
+    if (process.env.COUNT_FETCHES !== "1") {
+      return app.fetch(request, env);
+    }
+
+    const baseFetch = globalThis.fetch.bind(globalThis);
+    let total = 0;
+    let supabase = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      total += 1;
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      if (url.includes(".supabase.co/rest/")) supabase += 1;
+      return baseFetch(input, init);
+    }) as typeof fetch;
+    try {
+      return await app.fetch(request, env);
+    } finally {
+      globalThis.fetch = baseFetch;
+      console.log(`[fetch-count] total=${total} supabase=${supabase}`);
+    }
   },
 };
