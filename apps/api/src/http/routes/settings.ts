@@ -42,11 +42,11 @@ async function readChoice(
   let names: string[] = [];
   if (orderRaw) names = orderRaw.split(",").map((part) => part.trim()).filter(Boolean);
   else if (legacy) names = [legacy];
-  else names = ["scrapecreators", "apify"];
+  else names = ["apify", "scrapecreators"];
 
   const first = names[0] ?? "";
   const second = names[1] ?? "";
-  const primary: ProviderName = isProvider(first) ? first : "scrapecreators";
+  const primary: ProviderName = isProvider(first) ? first : "apify";
   const fallback: ProviderName | "none" =
     isProvider(second) && second !== primary ? second : "none";
   const dbValue = storedDb || "supabase";

@@ -108,6 +108,21 @@ describe("scrape provider fallback", () => {
     expect(secondary.calls).toBe(0);
   });
 
+  it("falls back when the provider route returns a non-JSON 404", async () => {
+    const primary = fake("scrapecreators", async () => {
+      throw new Error("ScrapeCreators /v1/tiktok/video: non-JSON 404 Not Found");
+    });
+    const secondary = fake("apify", async () => scrape("from-apify"));
+    const scraper = createFallbackProvider([primary, secondary], {
+      autoSwitch: true,
+    });
+
+    const result = await scraper.fetchPost(POST_URL);
+    expect(result.providerUsed).toBe("apify");
+    expect(result.fallbackUsed).toBe(true);
+    expect(secondary.calls).toBe(1);
+  });
+
   it("lists each provider and its reason when every provider fails", async () => {
     const primary = fake("scrapecreators", async () => {
       throw httpError(402, "token sk_live_SHOULD_NOT_LEAK");

@@ -84,6 +84,7 @@ function isNetwork(err: unknown, message: string): boolean {
 }
 
 function isContentError(message: string): boolean {
+  if (/non-JSON/i.test(message)) return false;
   return /post not found|not found|private|deleted|no items/i.test(message);
 }
 
@@ -101,6 +102,9 @@ export function classifyScrapeFailure(err: unknown): FailureInfo {
       ? "missing key"
       : redact(message).slice(0, 200);
     return { fallback: true, reason, cooldownMs: TEN_MINUTES_MS, status: "401" };
+  }
+  if (/non-JSON/i.test(message) && status === 404) {
+    return { fallback: true, reason: "HTTP 404", cooldownMs: 0, status: "error" };
   }
   if (isContentError(message) && status !== 401 && status !== 402 && status !== 429 && !(status && status >= 500)) {
     return { fallback: false, reason: redact(message).slice(0, 200), cooldownMs: 0, status: "error" };

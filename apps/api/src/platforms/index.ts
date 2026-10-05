@@ -61,7 +61,7 @@ export async function getScraper(env: ConnectionsEnv): Promise<ScrapeProvider> {
     }
     names = [legacy];
   } else {
-    names = ["scrapecreators", "apify"];
+    names = ["apify", "scrapecreators"];
   }
 
   let autoSwitch = true;

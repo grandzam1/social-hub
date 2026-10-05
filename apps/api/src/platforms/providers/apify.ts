@@ -58,10 +58,21 @@ async function connection(env: ConnectionsEnv, name: string): Promise<string> {
   throw new Error(`Missing connection "${name}" for project "${PROJECT}".`);
 }
 
+const DEFAULT_ACTORS: Record<Platform, string> = {
+  instagram: "apify/instagram-scraper",
+  tiktok: "clockworks/tiktok-scraper",
+  x: "apidojo/tweet-scraper",
+};
+
 function actorSetting(platform: Platform): string {
   if (platform === "instagram") return "apify_actor_instagram";
   if (platform === "tiktok") return "apify_actor_tiktok";
   return "apify_actor_x";
+}
+
+async function actorIdFor(env: ConnectionsEnv, platform: Platform): Promise<string> {
+  const stored = (await getAppSecret(env, actorSetting(platform)))?.trim();
+  return stored || DEFAULT_ACTORS[platform];
 }
 
 function actorIdPath(id: string): string {
@@ -111,7 +122,7 @@ function postInput(platform: Platform, url: string): Record<string, unknown> {
     return { directUrls: [url], resultsType: "posts", resultsLimit: 1 };
   }
   if (platform === "tiktok") {
-    return { postURLs: [url], resultsPerPage: 1, shouldDownloadVideos: false };
+    return { postURLs: [url], resultsPerPage: 1, shouldDownloadVideos: true };
   }
   return { startUrls: [url], maxItems: 1 };
 }
@@ -408,7 +419,7 @@ export function createApifyProvider(env: ConnectionsEnv): ScrapeProvider {
       const platform = detectPlatform(url);
       assertSinglePostUrl(url, platform);
       const token = await connection(env, "apify");
-      const actorId = await connection(env, actorSetting(platform));
+      const actorId = await actorIdFor(env, platform);
       const items = await runActor(token, actorId, postInput(platform, url));
       const first = items.find((item) => Object.keys(item).length);
       if (!first) {
@@ -418,7 +429,7 @@ export function createApifyProvider(env: ConnectionsEnv): ScrapeProvider {
     },
     async fetchFeed(handle: string, platform: Platform) {
       const token = await connection(env, "apify");
-      const actorId = await connection(env, actorSetting(platform));
+      const actorId = await actorIdFor(env, platform);
       const bare = handle.replace(/^@/, "");
       const items = await runActor(token, actorId, feedInput(platform, bare));
       const pageUrl =

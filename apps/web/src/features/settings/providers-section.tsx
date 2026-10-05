@@ -56,8 +56,8 @@ function other(name: ProviderName): ProviderName {
 }
 
 export function ProvidersSection() {
-  const [primary, setPrimary] = useState<ProviderName>("scrapecreators");
-  const [fallback, setFallback] = useState<ProviderName | "none">("apify");
+  const [primary, setPrimary] = useState<ProviderName>("apify");
+  const [fallback, setFallback] = useState<ProviderName | "none">("scrapecreators");
   const [autoSwitch, setAutoSwitch] = useState(true);
   const [dbProvider, setDbProvider] = useState<"supabase" | "airtable">("supabase");
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
