@@ -16,6 +16,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fetchJson, fmtNumber, fmtWhen } from "@/lib/api";
 import { normalizeCaption } from "@/lib/caption";
+import { detectPlatform, normalizeUrl } from "@/lib/normalize-url";
 import { ExpandableText } from "@/components/expandable-text";
 import {
   cacheAgeLabel,
@@ -47,7 +48,7 @@ type Parsed = {
 };
 
 function parseProfileInput(raw: string): Parsed {
-  const input = String(raw || "").trim();
+  const input = normalizeUrl(String(raw || "")) ?? String(raw || "").trim();
   if (!input) {
     return {
       handle: "",
@@ -66,12 +67,9 @@ function parseProfileInput(raw: string): Parsed {
       const u = new URL(withProto);
       const host = u.hostname.replace(/^www\./, "").toLowerCase();
       const parts = u.pathname.split("/").filter(Boolean);
+      const platform = detectPlatform(u.toString());
 
-      if (
-        host === "x.com" ||
-        host === "twitter.com" ||
-        host === "mobile.twitter.com"
-      ) {
+      if (platform === "x") {
         const skip = new Set([
           "i",
           "home",
@@ -99,7 +97,7 @@ function parseProfileInput(raw: string): Parsed {
         }
       }
 
-      if (host === "instagram.com" || host === "instagr.am") {
+      if (platform === "instagram") {
         const skip = new Set([
           "p",
           "reel",
@@ -108,6 +106,7 @@ function parseProfileInput(raw: string): Parsed {
           "stories",
           "explore",
           "accounts",
+          "share",
         ]);
         let handle = parts[0] || "";
         if (skip.has(handle.toLowerCase())) {
@@ -128,7 +127,7 @@ function parseProfileInput(raw: string): Parsed {
         }
       }
 
-      if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
+      if (platform === "tiktok") {
         let handle = parts[0] || "";
         if (handle.startsWith("@")) handle = handle.slice(1);
         const skip = new Set([
@@ -139,8 +138,15 @@ function parseProfileInput(raw: string): Parsed {
           "tag",
           "music",
           "video",
+          "t",
         ]);
-        if (parts[0] === "video" || parts.includes("video")) {
+        if (
+          host === "vt.tiktok.com" ||
+          host === "vm.tiktok.com" ||
+          parts[0] === "t" ||
+          parts[0] === "video" ||
+          parts.includes("video")
+        ) {
           return {
             handle: "",
             tip: "That looks like a video link. Paste a profile URL.",

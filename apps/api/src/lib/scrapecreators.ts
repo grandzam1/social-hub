@@ -36,14 +36,18 @@ export function assertSinglePostUrl(url: string, platform: Platform) {
     }
   }
   if (platform === "instagram") {
-    if (!/\/(p|reel|reels|tv)\//.test(u)) {
+    if (!/\/(p|reel|reels|tv|share)\//.test(u)) {
       throw new Error(
         "That looks like an Instagram profile. Paste a post/reel URL like https://www.instagram.com/reel/…",
       );
     }
   }
   if (platform === "tiktok") {
-    if (!/\/video\/\d+/.test(u) && !u.includes("vm.tiktok.com")) {
+    const short =
+      u.includes("vm.tiktok.com") ||
+      u.includes("vt.tiktok.com") ||
+      /tiktok\.com\/t\//.test(u);
+    if (!/\/video\/\d+/.test(u) && !short) {
       throw new Error(
         "That looks like a TikTok profile. Paste a video URL like https://www.tiktok.com/@user/video/123…",
       );

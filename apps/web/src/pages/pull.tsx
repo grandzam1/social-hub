@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,11 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { fetchJson, fmtNumber, hiResAvatar } from "@/lib/api";
 import { normalizeCaption } from "@/lib/caption";
+import {
+  detectPlatform,
+  normalizeUrl,
+  platformLabel,
+} from "@/lib/normalize-url";
 import { ExpandableText } from "@/components/expandable-text";
 
 function hostedPoster(url?: string): string | undefined {
@@ -71,10 +76,25 @@ export function PullPage() {
   const [error, setError] = useState(false);
   const [result, setResult] = useState<ScrapeResult | null>(null);
 
+  const recognized = useMemo(() => {
+    const clean = normalizeUrl(url);
+    if (!clean) return null;
+    const platform = detectPlatform(clean);
+    return { clean, platform };
+  }, [url]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const trimmed = url.trim();
-    if (!trimmed) return;
+    const cleaned = normalizeUrl(url);
+    if (!cleaned || !detectPlatform(cleaned)) {
+      setError(true);
+      setResult(null);
+      setStatus(
+        "Paste an Instagram, TikTok, or X link. A mobile share with extra text is fine.",
+      );
+      return;
+    }
+    setUrl(cleaned);
 
     setLoading(true);
     setResult(null);
@@ -85,7 +105,7 @@ export function PullPage() {
       const data = await fetchJson<ScrapeResult>("/api/scrape-post", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmed, saveToR2: saveR2 }),
+        body: JSON.stringify({ url: cleaned, saveToR2: saveR2 }),
       });
       setResult(data);
       if (!data.profile?.handle || data.profile.handle === "@unknown") {
@@ -134,11 +154,19 @@ export function PullPage() {
           <Input
             id="url"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setUrl(normalizeUrl(next) ?? next);
+            }}
             placeholder="https://…"
             autoComplete="off"
             className="h-11"
           />
+          {recognized?.platform ? (
+            <p className="text-sm text-muted-foreground">
+              {platformLabel(recognized.platform)} link
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
