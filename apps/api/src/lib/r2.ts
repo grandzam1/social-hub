@@ -56,7 +56,15 @@ export async function isHostedMediaUrl(url: string): Promise<boolean> {
   return url.startsWith(`${base}/`);
 }
 
-function cdnHeaders(url: string): Record<string, string> {
+function isApifyApiUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname === "api.apify.com";
+  } catch {
+    return false;
+  }
+}
+
+async function cdnHeaders(url: string): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
@@ -66,6 +74,12 @@ function cdnHeaders(url: string): Record<string, string> {
   if (url.includes("twimg.com")) headers.Referer = "https://x.com/";
   else if (url.includes("cdninstagram.com") || url.includes("instagram.com")) {
     headers.Referer = "https://www.instagram.com/";
+  } else if (url.includes("tiktokcdn.com") || url.includes("tiktok.com")) {
+    headers.Referer = "https://www.tiktok.com/";
+  }
+  if (isApifyApiUrl(url)) {
+    const token = (await getAppSecret(connectionsEnv(), "apify"))?.trim();
+    if (token) headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
@@ -148,7 +162,7 @@ export async function downloadCdnUrl(
   url: string,
 ): Promise<{ buffer: Buffer; contentType: string; bytes: number }> {
   const res = await fetch(url, {
-    headers: cdnHeaders(url),
+    headers: await cdnHeaders(url),
     redirect: "follow",
     // Large X videos can exceed this — callers should prefer async for big files
     signal: AbortSignal.timeout(180_000),
@@ -202,7 +216,7 @@ export async function transferCdnToR2(options: {
   fileType: string;
 }> {
   const res = await fetch(options.url, {
-    headers: cdnHeaders(options.url),
+    headers: await cdnHeaders(options.url),
     redirect: "follow",
     signal: AbortSignal.timeout(180_000),
   });
