@@ -1,4 +1,5 @@
-import { getConnection, type ConnectionsEnv } from "../../connections/index.js";
+import type { ConnectionsEnv } from "../../connections/index.js";
+import { getAppSecret } from "../../connections/secrets.js";
 import {
   assertSinglePostUrl,
   detectPlatform,
@@ -28,13 +29,32 @@ function asNum(v: unknown): number | undefined {
   return undefined;
 }
 
+function asFinite(v: unknown): number | null {
+  const n = asNum(v);
+  return n == null ? null : n;
+}
+
+/** Plan limit and this cycle's spend, from the Apify user and monthly usage payloads. */
+export function apifyUsageTotals(
+  userBody: unknown,
+  monthlyBody: unknown,
+): { given: number | null; used: number | null; remaining: number | null } {
+  const user = asObj(asObj(userBody)?.data) ?? asObj(userBody);
+  const plan = asObj(user?.plan);
+  const monthly = asObj(asObj(monthlyBody)?.data) ?? asObj(monthlyBody);
+  const given =
+    asFinite(plan?.maxMonthlyUsageUsd) ?? asFinite(plan?.monthlyUsageCreditsUsd);
+  const used =
+    asFinite(monthly?.totalUsageCreditsUsdAfterVolumeDiscount) ??
+    asFinite(monthly?.totalUsageCreditsUsd);
+  const remaining =
+    given != null && used != null ? Math.max(0, given - used) : null;
+  return { given, used, remaining };
+}
+
 async function connection(env: ConnectionsEnv, name: string): Promise<string> {
-  const value = (await getConnection(env, PROJECT, name))?.trim();
+  const value = (await getAppSecret(env, name))?.trim();
   if (value) return value;
-  if (name === "apify") {
-    const fromEnv = process.env.APIFY_TOKEN?.trim();
-    if (fromEnv) return fromEnv;
-  }
   throw new Error(`Missing connection "${name}" for project "${PROJECT}".`);
 }
 
@@ -413,14 +433,23 @@ export function createApifyProvider(env: ConnectionsEnv): ScrapeProvider {
     },
     async getCredits() {
       const token = await connection(env, "apify");
-      const res = await fetch("https://api.apify.com/v2/users/me", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Apify users/me: ${res.status} ${text.slice(0, 200)}`);
+      const headers = { Authorization: `Bearer ${token}` };
+      const [meRes, usageRes] = await Promise.all([
+        fetch("https://api.apify.com/v2/users/me", { headers }),
+        fetch("https://api.apify.com/v2/users/me/usage/monthly", { headers }),
+      ]);
+      if (!meRes.ok) {
+        const text = await meRes.text();
+        throw new Error(`Apify users/me: ${meRes.status} ${text.slice(0, 200)}`);
       }
-      return { remaining: null };
+      const user = await meRes.json();
+      const monthly = usageRes.ok ? await usageRes.json() : null;
+      const totals = apifyUsageTotals(user, monthly);
+      return {
+        remaining: totals.remaining,
+        given: totals.given,
+        used: totals.used,
+      };
     },
   };
 }

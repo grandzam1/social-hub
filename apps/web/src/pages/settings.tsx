@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProvidersSection } from "@/features/settings/providers-section";
 import { usePrefsStore, type ThemePref } from "@/lib/prefs";
 
 export function SettingsPage() {
@@ -55,6 +56,8 @@ export function SettingsPage() {
           </Select>
         </CardContent>
       </Card>
+
+      <ProvidersSection />
 
       <Card>
         <CardHeader>

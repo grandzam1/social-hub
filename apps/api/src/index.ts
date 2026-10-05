@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../..");
 config({ path: resolve(root, ".env") });
+config({ path: resolve(root, "apps/api/.dev.vars"), override: false });
 
 const app = createApp();
 const port = Number(process.env.PORT ?? 8787);

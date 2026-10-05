@@ -40,4 +40,6 @@ export type NormalizedScrape = {
   creditsCharged?: number;
   creditsRemaining?: number;
   cached?: boolean;
+  providerUsed?: string;
+  fallbackUsed?: boolean;
 };

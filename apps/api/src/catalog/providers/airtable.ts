@@ -1,36 +1,35 @@
+import { connectionsEnv } from "../../connections/runtime.js";
+import { getAppSecret } from "../../connections/secrets.js";
 import { recordAirtableRequest } from "../../lib/usage.js";
 import type { AirtableRecord, Catalog } from "../types.js";
 
 export type { AirtableRecord };
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env var: ${name}`);
-  return value;
+async function setting(name: string, fallback: string): Promise<string> {
+  const value = (await getAppSecret(connectionsEnv(), name))?.trim();
+  return value || fallback;
 }
 
 function baseId() {
-  return process.env.AIRTABLE_BASE_ID ?? "appkPrLfwDGwIIbTL";
+  return setting("airtable_base_id", "appkPrLfwDGwIIbTL");
 }
 
 function mediaTable() {
-  return process.env.AIRTABLE_MEDIA_TABLE ?? "tbly36b1qJiRbfEL2";
+  return setting("airtable_media_table", "tbly36b1qJiRbfEL2");
 }
 
 function postsTable() {
-  return process.env.AIRTABLE_POSTS_TABLE ?? "tblxevZB9wCX1N3WF";
+  return setting("airtable_posts_table", "tblxevZB9wCX1N3WF");
 }
 
 function profilesTable() {
-  return process.env.AIRTABLE_PROFILES_TABLE ?? "tblD49NYtqd3vdOTI";
+  return setting("airtable_profiles_table", "tblD49NYtqd3vdOTI");
 }
 
-function token() {
-  return (
-    process.env.AIRTABLE_TOKEN ||
-    process.env.AIRTABLE_API_KEY ||
-    required("AIRTABLE_TOKEN")
-  );
+async function token() {
+  const value = (await getAppSecret(connectionsEnv(), "airtable_token"))?.trim();
+  if (!value) throw new Error("Missing env var: AIRTABLE_TOKEN");
+  return value;
 }
 
 function errorCause(err: unknown): string {
@@ -55,7 +54,7 @@ function sleep(ms: number) {
 
 async function airtableFetch(path: string, init?: RequestInit) {
   const method = init?.method ?? "GET";
-  const url = `https://api.airtable.com/v0/${baseId()}${path}`;
+  const url = `https://api.airtable.com/v0/${await baseId()}${path}`;
   const attempts = 3;
   let lastErr: unknown;
 
@@ -64,7 +63,7 @@ async function airtableFetch(path: string, init?: RequestInit) {
       const res = await fetch(url, {
         ...init,
         headers: {
-          Authorization: `Bearer ${token()}`,
+          Authorization: `Bearer ${await token()}`,
           "Content-Type": "application/json",
           ...(init?.headers ?? {}),
         },
@@ -155,22 +154,22 @@ export async function listRecords(
 
 export async function listPosts(pageSize = 50) {
   try {
-    return await listRecords(postsTable(), {
+    return await listRecords(await postsTable(), {
       pageSize,
       sortField: "Scraped",
       sortDir: "desc",
     });
   } catch {
-    return listRecords(postsTable(), { pageSize });
+    return listRecords(await postsTable(), { pageSize });
   }
 }
 
 export async function listMedia(pageSize = 100) {
-  return listRecords(mediaTable(), { pageSize: Math.min(pageSize, 100) });
+  return listRecords(await mediaTable(), { pageSize: Math.min(pageSize, 100) });
 }
 
 export async function listProfiles(pageSize = 100) {
-  return listRecords(profilesTable(), { pageSize: Math.min(pageSize, 100) });
+  return listRecords(await profilesTable(), { pageSize: Math.min(pageSize, 100) });
 }
 
 async function createRecord(
@@ -196,7 +195,7 @@ async function patchRecord(
 
 export async function getMedia(recordId: string): Promise<AirtableRecord> {
   return (await airtableFetch(
-    `/${mediaTable()}/${recordId}`,
+    `/${await mediaTable()}/${recordId}`,
   )) as AirtableRecord;
 }
 
@@ -204,19 +203,19 @@ export async function updateMedia(
   recordId: string,
   fields: Record<string, unknown>,
 ): Promise<AirtableRecord> {
-  return patchRecord(mediaTable(), recordId, fields);
+  return patchRecord(await mediaTable(), recordId, fields);
 }
 
 export async function updatePost(
   recordId: string,
   fields: Record<string, unknown>,
 ): Promise<AirtableRecord> {
-  return patchRecord(postsTable(), recordId, fields);
+  return patchRecord(await postsTable(), recordId, fields);
 }
 
 export async function getPost(recordId: string): Promise<AirtableRecord> {
   return (await airtableFetch(
-    `/${postsTable()}/${recordId}`,
+    `/${await postsTable()}/${recordId}`,
   )) as AirtableRecord;
 }
 
@@ -235,7 +234,7 @@ export async function listMediaForPost(
     filterByFormula: formula,
     pageSize: "100",
   });
-  const data = (await airtableFetch(`/${mediaTable()}?${qs}`)) as {
+  const data = (await airtableFetch(`/${await mediaTable()}?${qs}`)) as {
     records: AirtableRecord[];
   };
   return [...data.records].sort(
@@ -251,7 +250,7 @@ export async function findPostLink(
   const variants = [...new Set([handle.trim(), bare, `@${bare}`].filter(Boolean))];
   for (const variant of variants) {
     const found = await findOne(
-      postsTable(),
+      await postsTable(),
       `AND(${formulaEq("Author", variant)},${formulaEq("Platform", platform)})`,
     );
     const link = found?.fields.Link;
@@ -268,7 +267,7 @@ export async function findProfile(
   const variants = [...new Set([handle.trim(), bare, `@${bare}`].filter(Boolean))];
   for (const variant of variants) {
     const found = await findOne(
-      profilesTable(),
+      await profilesTable(),
       `AND(${formulaEq("Handle", variant)},${formulaEq("Platform", platform)})`,
     );
     if (found) return found;
@@ -280,7 +279,7 @@ export async function updateProfile(
   recordId: string,
   fields: Record<string, unknown>,
 ): Promise<AirtableRecord> {
-  return patchRecord(profilesTable(), recordId, fields);
+  return patchRecord(await profilesTable(), recordId, fields);
 }
 
 export async function upsertProfile(
@@ -290,14 +289,14 @@ export async function upsertProfile(
   const platform = String(fields.Platform ?? "");
   if (handle && platform) {
     const existing = await findOne(
-      profilesTable(),
+      await profilesTable(),
       `AND(${formulaEq("Handle", handle)},${formulaEq("Platform", platform)})`,
     );
     if (existing) {
-      return patchRecord(profilesTable(), existing.id, fields);
+      return patchRecord(await profilesTable(), existing.id, fields);
     }
   }
-  return createRecord(profilesTable(), fields);
+  return createRecord(await profilesTable(), fields);
 }
 
 export async function upsertPost(
@@ -305,12 +304,12 @@ export async function upsertPost(
 ): Promise<AirtableRecord> {
   const postId = String(fields["Post ID"] ?? "");
   if (postId) {
-    const existing = await findOne(postsTable(), formulaEq("Post ID", postId));
+    const existing = await findOne(await postsTable(), formulaEq("Post ID", postId));
     if (existing) {
-      return patchRecord(postsTable(), existing.id, fields);
+      return patchRecord(await postsTable(), existing.id, fields);
     }
   }
-  return createRecord(postsTable(), fields);
+  return createRecord(await postsTable(), fields);
 }
 
 export async function upsertMedia(
@@ -319,7 +318,7 @@ export async function upsertMedia(
   const mediaId = String(fields["Media ID"] ?? "");
   if (mediaId) {
     const existing = await findOne(
-      mediaTable(),
+      await mediaTable(),
       formulaEq("Media ID", mediaId),
     );
     if (existing) {
@@ -328,10 +327,10 @@ export async function upsertMedia(
       if (!merged["Saved copy"] && existing.fields["Saved copy"]) {
         delete merged["Saved copy"];
       }
-      return patchRecord(mediaTable(), existing.id, merged);
+      return patchRecord(await mediaTable(), existing.id, merged);
     }
   }
-  return createRecord(mediaTable(), fields);
+  return createRecord(await mediaTable(), fields);
 }
 
 export const airtableCatalog: Catalog = {

@@ -17,5 +17,10 @@ export interface ScrapeProvider {
     platform: Platform,
     cursor?: string,
   ): Promise<NormalizedScrape[]>;
-  getCredits?(): Promise<{ remaining: number | null }>;
+  getCredits?(): Promise<{
+    remaining: number | null;
+    given?: number | null;
+    used?: number | null;
+    providers?: Array<{ name: string; remaining: number | null }>;
+  }>;
 }

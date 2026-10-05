@@ -8,6 +8,7 @@ import { queueMediaSaves } from "./queue-media-save.js";
 import { isHostedMediaUrl } from "./r2.js";
 import { saveAvatarToR2 } from "./profile-avatar.js";
 import { invalidateLibrary } from "./library-cache.js";
+import { recordUsageEvent } from "./usage.js";
 
 async function catalog() {
   return getCatalog(connectionsEnv());
@@ -86,6 +87,8 @@ export type ScrapePostResult = {
   creditsCharged?: number;
   creditsRemaining?: number;
   cached?: boolean;
+  provider_used?: string;
+  fallback?: boolean;
 };
 
 export async function scrapePostPipeline(
@@ -109,7 +112,7 @@ export async function scrapePostPipeline(
     normalized.platform,
   );
   const existingAvatar = String(existingProfile?.fields.Avatar ?? "");
-  let avatar = isHostedMediaUrl(existingAvatar) ? existingAvatar : "";
+  let avatar = (await isHostedMediaUrl(existingAvatar)) ? existingAvatar : "";
   if (!avatar && normalized.authorAvatar) {
     try {
       avatar = await saveAvatarToR2({
@@ -297,7 +300,21 @@ export async function scrapePostPipeline(
     creditsCharged: normalized.creditsCharged,
     creditsRemaining: normalized.creditsRemaining,
     cached: normalized.cached,
+    provider_used: normalized.providerUsed,
+    fallback: Boolean(normalized.fallbackUsed),
   });
+
+  if (normalized.providerUsed) {
+    recordUsageEvent({
+      service: normalized.providerUsed === "apify" ? "apify" : "scrapecreators",
+      metric: "api_request",
+      delta: 1,
+      unit: "count",
+      path: "/api/scrape-post",
+      method: "POST",
+      detail: `provider_used=${normalized.providerUsed}; fallback=${normalized.fallbackUsed ? "yes" : "no"}`,
+    });
+  }
 
   if (saveMode === "async" && mediaOut.length) {
     const jobs = mediaOut.map((m) => ({

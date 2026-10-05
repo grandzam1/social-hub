@@ -5,6 +5,7 @@ import {
   fetchTikTokProfileVideos,
   fetchTwitterUserTweets,
   getCreditBalance,
+  getCreditUsage,
   scrapeInstagramPost,
   scrapeTikTokVideo,
   scrapeTwitterTweet,
@@ -393,7 +394,27 @@ export function createScrapeCreatorsProvider(): ScrapeProvider {
       });
     },
     async getCredits() {
-      return { remaining: await getCreditBalance() };
+      let remaining: number | null = null;
+      let balanceError: Error | null = null;
+      try {
+        remaining = await getCreditBalance();
+      } catch (err) {
+        balanceError = err instanceof Error ? err : new Error(String(err));
+      }
+      let used: number | null = null;
+      try {
+        const history = await getCreditUsage(1);
+        used = history.reduce(
+          (sum, row) => sum + (Number.isFinite(row.credits) ? row.credits : 0),
+          0,
+        );
+      } catch {
+        used = null;
+      }
+      if (balanceError && remaining == null && used == null) throw balanceError;
+      const given =
+        remaining != null && used != null ? remaining + used : null;
+      return { remaining, used, given };
     },
   };
 }

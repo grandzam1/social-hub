@@ -1,5 +1,5 @@
-import { getConnection } from "../connections/index.js";
 import { connectionsEnv } from "../connections/runtime.js";
+import { getAppSecret } from "../connections/secrets.js";
 import type { Platform } from "./types.js";
 import {
   readCached,
@@ -8,26 +8,10 @@ import {
   writeCached,
 } from "./sc-cache.js";
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env var: ${name}`);
-  return value;
-}
-
 async function apiKey(): Promise<string> {
-  const env = connectionsEnv();
-  if (env.DB) {
-    try {
-      const stored = await getConnection(env, "social-hub", "scrapecreators");
-      if (stored) return stored;
-    } catch (err) {
-      console.warn(
-        "[sc] stored scrapecreators key unavailable; using env",
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-  return required("SCRAPECREATORS_API_KEY");
+  const stored = (await getAppSecret(connectionsEnv(), "scrapecreators"))?.trim();
+  if (!stored) throw new Error("Missing env var: SCRAPECREATORS_API_KEY");
+  return stored;
 }
 
 export function detectPlatform(url: string): Platform {

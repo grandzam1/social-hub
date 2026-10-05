@@ -72,6 +72,9 @@ export function previewRows(pairs: EnvPair[], existing: Set<string>): PreviewRow
     } else if (!variableName.safeParse(pair.name).success) {
       status = "Invalid";
       reason = "illegal characters";
+    } else if (pair.name.toLowerCase() === "master_key") {
+      status = "Invalid";
+      reason = "reserved name";
     } else if (seen.has(pair.name)) {
       status = "Invalid";
       reason = "duplicate name in the paste";

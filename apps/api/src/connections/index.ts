@@ -76,6 +76,10 @@ function requireMasterKey(env: ConnectionsEnv): string {
   return key;
 }
 
+export function isReservedConnectionName(name: string): boolean {
+  return name.trim().toLowerCase() === "master_key";
+}
+
 async function readRow(
   db: ConnectionsDb,
   project: string,
@@ -87,6 +91,18 @@ async function readRow(
     )
     .bind(project, name)
     .first<StoredRow>();
+}
+
+/** Decrypted value stored on this project only. Does not fall back to global or links. */
+export async function getStoredConnection(
+  env: ConnectionsEnv,
+  project: string,
+  name: string,
+): Promise<string | null> {
+  if (!env.DB) return null;
+  const row = await readRow(env.DB, project, name);
+  if (!row) return null;
+  return decryptValue(requireMasterKey(env), row.value_encrypted);
 }
 
 /**
@@ -120,6 +136,7 @@ export async function setConnection(
   kind: ConnectionKind,
   value: string,
 ): Promise<{ action: "create" | "update" }> {
+  if (isReservedConnectionName(name)) throw new Error("reserved name");
   const db = requireDb(env);
   const encrypted = await encryptValue(requireMasterKey(env), value);
   const existing = await readRow(db, project, name);
@@ -243,6 +260,10 @@ export async function setConnectionsBulk(
         name: parsed.data.name,
         reason: bulkSkipReason(parsed.data),
       });
+      continue;
+    }
+    if (isReservedConnectionName(parsed.data.name)) {
+      skipped.push({ name: parsed.data.name, reason: "reserved name" });
       continue;
     }
     if (seen.has(parsed.data.name)) {

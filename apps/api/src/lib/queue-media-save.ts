@@ -1,3 +1,5 @@
+import { connectionsEnv } from "../connections/runtime.js";
+import { getAppSecret } from "../connections/secrets.js";
 import type { SaveMediaInput } from "./save-media.js";
 
 const TRIGGER_API = "https://api.trigger.dev";
@@ -5,7 +7,7 @@ const TRIGGER_API = "https://api.trigger.dev";
 export async function queueMediaSaves(
   items: SaveMediaInput[],
 ): Promise<{ id: string; runCount: number }> {
-  const key = process.env.TRIGGER_SECRET_KEY;
+  const key = (await getAppSecret(connectionsEnv(), "trigger_secret_key"))?.trim();
   if (!key) throw new Error("Missing env var: TRIGGER_SECRET_KEY");
   if (!items.length) throw new Error("No media to queue");
 

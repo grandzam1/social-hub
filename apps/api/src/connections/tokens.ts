@@ -1,5 +1,7 @@
 import { decryptValue, encryptValue, maskToken, sha256Hex } from "./crypto.js";
+import { filterVaultValues } from "./groups.js";
 import type { ConnectionsDb, ConnectionsEnv } from "./index.js";
+import { listProjectLinks } from "./links.js";
 
 export type ProjectToken = {
   id: string;
@@ -168,6 +170,7 @@ export async function deleteProjectToken(env: ConnectionsEnv, id: string): Promi
 export async function readVaultEnv(
   env: ConnectionsEnv,
   token: string,
+  filter?: { service?: string; name?: string },
 ): Promise<{ project: string; values: Record<string, string> } | null> {
   const db = requireDb(env);
   const masterKey = requireMasterKey(env);
@@ -178,19 +181,18 @@ export async function readVaultEnv(
     .first<{ id: string; project: string }>();
   if (!owner) return null;
 
-  const data = await db
-    .prepare(
-      "SELECT project, name, value_encrypted FROM connections WHERE project = ? OR project = 'global'",
-    )
-    .bind(owner.project)
-    .all<{ project: string; name: string; value_encrypted: string }>();
+  const sources = owner.project === "global" ? [] : await listProjectLinks(env, owner.project);
+  const layers =
+    owner.project === "global"
+      ? ["global"]
+      : ["global", ...[...sources].reverse(), owner.project];
   const values: Record<string, string> = {};
-  const rows = data.results ?? [];
-  for (const row of rows.filter((row) => row.project === "global")) {
-    values[row.name] = await decryptValue(masterKey, row.value_encrypted);
-  }
-  if (owner.project !== "global") {
-    for (const row of rows.filter((row) => row.project === owner.project)) {
+  for (const project of layers) {
+    const data = await db
+      .prepare("SELECT name, value_encrypted FROM connections WHERE project = ?")
+      .bind(project)
+      .all<{ name: string; value_encrypted: string }>();
+    for (const row of data.results ?? []) {
       values[row.name] = await decryptValue(masterKey, row.value_encrypted);
     }
   }
@@ -198,5 +200,11 @@ export async function readVaultEnv(
     .prepare("UPDATE project_tokens SET last_used_at = ? WHERE id = ?")
     .bind(new Date().toISOString(), owner.id)
     .run();
-  return { project: owner.project, values };
+  return {
+    project: owner.project,
+    values: filterVaultValues(values, {
+      service: filter?.service,
+      name: filter?.name,
+    }),
+  };
 }

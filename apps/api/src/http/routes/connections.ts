@@ -9,6 +9,9 @@ import {
   type ConnectionKind,
   type ConnectionsEnv,
 } from "../../connections/index.js";
+import { checkServiceHealth } from "../../connections/health.js";
+import { listProjectLinks, setProjectLinks } from "../../connections/links.js";
+import { importEnvSecrets, isBlockedSecretName } from "../../connections/secrets.js";
 
 const PROJECT_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -19,6 +22,12 @@ function fail(message: string, status: 400 | 404 | 503 = 400) {
   return { ok: false as const, error: message, status };
 }
 
+function statusFor(message: string): 400 | 503 | 500 {
+  if (message.includes("not configured") || message.includes("not set")) return 503;
+  if (message.includes("reserved name")) return 400;
+  return 500;
+}
+
 function readIdentity(project: string, name: string) {
   const projectName = decodeURIComponent(project).trim();
   const connectionName = decodeURIComponent(name).trim();
@@ -27,6 +36,7 @@ function readIdentity(project: string, name: string) {
   }
   if (!connectionName) return fail("empty name");
   if (!VARIABLE_NAME.test(connectionName)) return fail("illegal characters");
+  if (isBlockedSecretName(connectionName)) return fail("reserved name");
   return { project: projectName, name: connectionName };
 }
 
@@ -46,12 +56,31 @@ connectionsRoutes.get("/history", async (c) => {
 
 connectionsRoutes.get("/", async (c) => {
   try {
+    await importEnvSecrets(c.env);
     const connections = await listConnections(c.env);
     return c.json({ ok: true, connections });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const status = message.includes("not configured") || message.includes("not set") ? 503 : 500;
     return c.json({ ok: false, error: message }, status);
+  }
+});
+
+connectionsRoutes.post("/:project/health/:service", async (c) => {
+  const project = decodeURIComponent(c.req.param("project")).trim();
+  const service = decodeURIComponent(c.req.param("service")).trim();
+  if (!PROJECT_PATTERN.test(project)) {
+    return c.json(
+      { ok: false, error: "project must be 1-64 letters, numbers, dots, dashes, or underscores" },
+      400,
+    );
+  }
+  try {
+    const result = await checkServiceHealth(c.env, project, service);
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, statusFor(message));
   }
 });
 
@@ -90,6 +119,51 @@ connectionsRoutes.put("/:project/bulk", async (c) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const status = message.includes("not configured") || message.includes("not set") ? 503 : 500;
+    return c.json({ ok: false, error: message }, status);
+  }
+});
+
+connectionsRoutes.get("/:project/links", async (c) => {
+  const project = decodeURIComponent(c.req.param("project")).trim();
+  if (!PROJECT_PATTERN.test(project)) {
+    return c.json(
+      { ok: false, error: "project must be 1-64 letters, numbers, dots, dashes, or underscores" },
+      400,
+    );
+  }
+  try {
+    const sources = await listProjectLinks(c.env, project);
+    return c.json({ ok: true, project, sources });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message.includes("not configured") || message.includes("not set") ? 503 : 500;
+    return c.json({ ok: false, error: message }, status);
+  }
+});
+
+connectionsRoutes.put("/:project/links", async (c) => {
+  const project = decodeURIComponent(c.req.param("project")).trim();
+  if (!PROJECT_PATTERN.test(project)) {
+    return c.json(
+      { ok: false, error: "project must be 1-64 letters, numbers, dots, dashes, or underscores" },
+      400,
+    );
+  }
+  let body: { sources?: unknown };
+  try {
+    body = (await c.req.json()) as { sources?: unknown };
+  } catch {
+    return c.json({ ok: false, error: "JSON body required" }, 400);
+  }
+  if (!Array.isArray(body.sources) || body.sources.some((source) => typeof source !== "string")) {
+    return c.json({ ok: false, error: "sources must be a list" }, 400);
+  }
+  try {
+    const sources = await setProjectLinks(c.env, project, body.sources);
+    return c.json({ ok: true, project, sources });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message.includes("not configured") || message.includes("not set") ? 503 : 400;
     return c.json({ ok: false, error: message }, status);
   }
 });
@@ -146,8 +220,7 @@ connectionsRoutes.put("/:project/:name", async (c) => {
     return c.json({ ok: true, ...result, project: identity.project, name: identity.name });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const status = message.includes("not configured") || message.includes("not set") ? 503 : 500;
-    return c.json({ ok: false, error: message }, status);
+    return c.json({ ok: false, error: message }, statusFor(message));
   }
 });
 

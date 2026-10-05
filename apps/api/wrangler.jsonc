@@ -19,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "social-hub-connections",
-      "database_id": "00000000-0000-4000-8000-000000000001",
+      "database_id": "ce04c1fa-0307-41dc-b7c4-317292a97850",
       "migrations_dir": "migrations"
     }
   ],

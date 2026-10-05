@@ -1,4 +1,5 @@
 import { task } from "@trigger.dev/sdk";
+import { ensureDefaultDbProvider } from "../catalog/index.js";
 import { refreshPostSaveStatus } from "../lib/post-status.js";
 import {
   recordMediaSaveFailure,
@@ -22,6 +23,7 @@ export const saveMediaToR2 = task({
     });
   },
   run: async (payload: SaveMediaInput) => {
+    ensureDefaultDbProvider();
     const postId = payload.postRecordId;
     try {
       return await saveMediaCdnToR2(payload);

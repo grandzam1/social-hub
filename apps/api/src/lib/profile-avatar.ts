@@ -35,7 +35,7 @@ export async function saveAvatarToR2(options: {
   handle: string;
   sourceUrl: string;
 }): Promise<string> {
-  if (isHostedMediaUrl(options.sourceUrl)) return options.sourceUrl;
+  if (await isHostedMediaUrl(options.sourceUrl)) return options.sourceUrl;
   const uploaded = await transferCdnToR2({
     url: options.sourceUrl,
     objectKey: avatarKey(options.platform, options.handle),
@@ -46,7 +46,7 @@ export async function saveAvatarToR2(options: {
 }
 
 async function storedUrlWorks(url: string): Promise<boolean> {
-  if (!url || isHostedMediaUrl(url)) return false;
+  if (!url || (await isHostedMediaUrl(url))) return false;
   try {
     const res = await fetch(url, {
       method: "GET",
@@ -105,7 +105,7 @@ export async function ensureSavedAvatar(
     const profile = await findProfile(handle, platform);
     if (!profile) return null;
     const current = String(profile.fields.Avatar ?? profile.fields.avatar ?? "");
-    if (current && isHostedMediaUrl(current)) return current;
+    if (current && (await isHostedMediaUrl(current))) return current;
     const source = await avatarSource(platform, handle, current);
     if (!source) {
       failed.add(key);

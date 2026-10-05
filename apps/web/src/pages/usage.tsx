@@ -10,15 +10,17 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchJson } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 type ServiceUsage = {
+  key?: string;
   service: string;
-  unit: "credits" | "requests" | "bytes";
+  unit: string;
+  metrics?: string[];
   given: number | null;
   used: number | null;
   remaining: number | null;
   source: string;
+  detail?: string;
 };
 
 type UsageResponse = {
@@ -30,7 +32,7 @@ type UsageResponse = {
   error?: string;
 };
 
-function fmtValue(n: number | null, unit: ServiceUsage["unit"]) {
+function fmtValue(n: number | null, unit: string) {
   if (n == null || !Number.isFinite(n)) return "—";
   if (unit === "bytes") {
     if (!n) return "0 B";
@@ -44,8 +46,31 @@ function fmtValue(n: number | null, unit: ServiceUsage["unit"]) {
     return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
   }
   const label =
-    unit === "credits" ? "credits" : unit === "requests" ? "requests" : "";
-  return `${n.toLocaleString()} ${label}`.trim();
+    unit === "credits" || unit === "requests" || unit === "count"
+      ? unit === "count"
+        ? "requests"
+        : unit
+      : unit;
+  const text =
+    Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return `${text} ${label}`.trim();
+}
+
+function seriesNote(row: ServiceUsage) {
+  if (row.detail) return row.detail;
+  const what =
+    row.unit === "credits"
+      ? "Credits"
+      : row.unit === "requests" || row.unit === "count"
+        ? "Requests"
+        : row.unit === "bytes"
+          ? "Stored bytes"
+          : row.metrics?.join(", ") || row.unit;
+  if (row.given == null && row.remaining == null) {
+    return `${what}. This is a running total. Record an allowance on the same service and unit to show what remains.`;
+  }
+  if (row.source === "live") return `${what} from the provider account.`;
+  return `${what} from recorded usage.`;
 }
 
 function ProgressBar({
@@ -95,46 +120,78 @@ function ProgressBar({
 function ServiceCard({ row }: { row: ServiceUsage }) {
   const hasBalance =
     row.given != null || row.remaining != null || row.used != null;
+  const storage = row.unit === "bytes" && row.given != null && row.used != null;
+  const usedPct =
+    storage && row.given! > 0
+      ? Math.min(100, Math.max(0, (row.used! / row.given!) * 100))
+      : 0;
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-lg">{row.service}</CardTitle>
-        <CardDescription className="text-xs">
-          {row.source === "scrapecreators"
-            ? "Live balance from ScrapeCreators; used from their usage log"
-            : "Recorded in usage_events (no vendor quota available)"}
-        </CardDescription>
+        <CardTitle className="text-lg">{storage ? "Storage" : row.service}</CardTitle>
+        <CardDescription className="text-xs">{seriesNote(row)}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {!hasBalance ? (
           <p className="text-sm text-muted-foreground">No data yet.</p>
+        ) : storage ? (
+          <div className="space-y-3">
+            <p className="text-sm">
+              <span className="text-lg font-semibold tabular-nums">
+                {fmtValue(row.used, "bytes")}
+              </span>
+              <span className="text-muted-foreground">
+                {" "}
+                of {fmtValue(row.given, "bytes")} used
+              </span>
+            </p>
+            <div
+              className="h-2.5 overflow-hidden rounded-full bg-muted"
+              role="meter"
+              aria-valuemin={0}
+              aria-valuemax={row.given ?? 0}
+              aria-valuenow={row.used ?? 0}
+              aria-label="Storage used"
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-[width]"
+                style={{ width: `${usedPct}%` }}
+              />
+            </div>
+            <p className="font-mono text-[11px] text-muted-foreground">
+              {row.used! > row.given!
+                ? "Over the included storage"
+                : `${Math.round(usedPct)}% of included storage`}
+            </p>
+          </div>
         ) : (
           <>
             <dl className="grid gap-2 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-muted-foreground">Given</dt>
-                <dd className="font-mono tabular-nums">
-                  {fmtValue(row.given, row.unit)}
-                </dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-muted-foreground">Used</dt>
-                <dd className="font-mono tabular-nums">
-                  {fmtValue(row.used, row.unit)}
-                </dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-muted-foreground">Remaining</dt>
-                <dd
-                  className={cn(
-                    "font-mono text-base font-semibold tabular-nums",
-                    row.remaining == null && "font-normal text-muted-foreground",
-                  )}
-                >
-                  {fmtValue(row.remaining, row.unit)}
-                </dd>
-              </div>
+              {row.given != null ? (
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="text-muted-foreground">Given</dt>
+                  <dd className="font-mono tabular-nums">
+                    {fmtValue(row.given, row.unit)}
+                  </dd>
+                </div>
+              ) : null}
+              {row.used != null ? (
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="text-muted-foreground">Used</dt>
+                  <dd className="font-mono tabular-nums">
+                    {fmtValue(row.used, row.unit)}
+                  </dd>
+                </div>
+              ) : null}
+              {row.remaining != null ? (
+                <div className="flex items-baseline justify-between gap-3">
+                  <dt className="text-muted-foreground">Remaining</dt>
+                  <dd className="font-mono text-base font-semibold tabular-nums">
+                    {fmtValue(row.remaining, row.unit)}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
             <ProgressBar
               given={row.given}
@@ -199,8 +256,8 @@ export function UsagePage() {
       ) : null}
       {data && !data.configured ? (
         <p className="text-sm text-muted-foreground">
-          Set <code className="text-xs">AIRTABLE_USAGE_EVENTS_TABLE</code> to
-          persist Airtable/R2 usage. ScrapeCreators remaining still loads live.
+          Usage events are not being stored yet. Provider balances still load
+          live.
         </p>
       ) : null}
       {data?.warning ? (
@@ -217,7 +274,7 @@ export function UsagePage() {
       {data?.services?.length ? (
         <div className="grid gap-3">
           {data.services.map((row) => (
-            <ServiceCard key={row.service} row={row} />
+            <ServiceCard key={row.key ?? `${row.service}:${row.unit}`} row={row} />
           ))}
         </div>
       ) : null}

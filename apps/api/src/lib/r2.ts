@@ -2,10 +2,17 @@ import { Readable } from "node:stream";
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { DOMParser, Node as XmlNode } from "@xmldom/xmldom";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getAppSecret } from "../connections/secrets.js";
 import { recordR2Upload } from "./usage.js";
+
+const DEFAULT_R2_BUCKET = "scrape-kit-media";
+const DEFAULT_R2_PUBLIC_BASE = "https://pub-dd096d99ffc0494a9164b431ea60c9c6.r2.dev";
 
 export type DetectedMedia = {
   kind: "image" | "video" | "gif";
@@ -13,30 +20,39 @@ export type DetectedMedia = {
   fileType: string;
 };
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env var: ${name}`);
-  return value;
+type R2Config = {
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucket: string;
+  publicBase: string;
+};
+
+async function r2Config(): Promise<R2Config> {
+  const env = connectionsEnv();
+  const accountId = (await getAppSecret(env, "r2_account_id"))?.trim() ?? "";
+  const accessKeyId = (await getAppSecret(env, "r2_access_key_id"))?.trim() ?? "";
+  const secretAccessKey = (await getAppSecret(env, "r2_secret_access_key"))?.trim() ?? "";
+  if (!accountId) throw new Error("Missing env var: R2_ACCOUNT_ID");
+  if (!accessKeyId) throw new Error("Missing env var: R2_ACCESS_KEY_ID");
+  if (!secretAccessKey) throw new Error("Missing env var: R2_SECRET_ACCESS_KEY");
+  const bucket = (await getAppSecret(env, "r2_bucket"))?.trim() || DEFAULT_R2_BUCKET;
+  const publicBase = (
+    (await getAppSecret(env, "r2_public_base_url"))?.trim() || DEFAULT_R2_PUBLIC_BASE
+  ).replace(/\/$/, "");
+  return { accountId, accessKeyId, secretAccessKey, bucket, publicBase };
 }
 
-function bucketName(): string {
-  return process.env.R2_BUCKET ?? "scrape-kit-media";
-}
-
-function publicBase(): string {
-  return (
-    process.env.R2_PUBLIC_BASE_URL ??
-    "https://pub-dd096d99ffc0494a9164b431ea60c9c6.r2.dev"
-  );
-}
-
-function publicUrl(key: string): string {
-  return `${publicBase().replace(/\/$/, "")}/${key}`;
+function publicUrl(base: string, key: string): string {
+  return `${base.replace(/\/$/, "")}/${key}`;
 }
 
 /** True when the URL is already a file we host. */
-export function isHostedMediaUrl(url: string): boolean {
-  const base = publicBase().replace(/\/$/, "");
+export async function isHostedMediaUrl(url: string): Promise<boolean> {
+  const base = (
+    (await getAppSecret(connectionsEnv(), "r2_public_base_url"))?.trim() ||
+    DEFAULT_R2_PUBLIC_BASE
+  ).replace(/\/$/, "");
   return url.startsWith(`${base}/`);
 }
 
@@ -54,16 +70,77 @@ function cdnHeaders(url: string): Record<string, string> {
   return headers;
 }
 
-function client() {
-  const accountId = required("R2_ACCOUNT_ID");
-  return new S3Client({
-    region: "auto",
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId: required("R2_ACCESS_KEY_ID"),
-      secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
-    },
-  });
+/** Storage included with an R2 account. Not a hard cap on paid use. */
+export const R2_INCLUDED_BYTES = 10 * 1024 * 1024 * 1024;
+
+export type R2StorageUsage = {
+  bytes: number;
+  objects: number;
+  truncated: boolean;
+};
+
+const STORAGE_CACHE_MS = 5 * 60 * 1000;
+let storageCache: { at: number; value: R2StorageUsage } | null = null;
+
+/**
+ * Sum object sizes in the bucket.
+ * One list page is an R2 Class A request. The result is reused for 5 minutes.
+ */
+function ensureXmlParser() {
+  const scope = globalThis as typeof globalThis & {
+    DOMParser?: typeof DOMParser;
+    Node?: typeof XmlNode;
+  };
+  if (typeof scope.DOMParser === "undefined") scope.DOMParser = DOMParser;
+  if (typeof scope.Node === "undefined") scope.Node = XmlNode;
+}
+
+export async function measureR2Bucket(): Promise<R2StorageUsage> {
+  if (storageCache && Date.now() - storageCache.at < STORAGE_CACHE_MS) {
+    return storageCache.value;
+  }
+  ensureXmlParser();
+  const { s3, bucket } = await openR2();
+  let token: string | undefined;
+  let bytes = 0;
+  let objects = 0;
+  let truncated = false;
+  const maxPages = 50;
+  for (let page = 0; page < maxPages; page += 1) {
+    const out = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: token,
+        MaxKeys: 1000,
+      }),
+    );
+    for (const item of out.Contents ?? []) {
+      bytes += item.Size ?? 0;
+      objects += 1;
+    }
+    if (!out.IsTruncated || !out.NextContinuationToken) break;
+    token = out.NextContinuationToken;
+    truncated = page === maxPages - 1;
+  }
+  const value = { bytes, objects, truncated };
+  storageCache = { at: Date.now(), value };
+  return value;
+}
+
+async function openR2(): Promise<{ s3: S3Client; bucket: string; publicBase: string }> {
+  const cfg = await r2Config();
+  return {
+    s3: new S3Client({
+      region: "auto",
+      endpoint: `https://${cfg.accountId}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: cfg.accessKeyId,
+        secretAccessKey: cfg.secretAccessKey,
+      },
+    }),
+    bucket: cfg.bucket,
+    publicBase: cfg.publicBase,
+  };
 }
 
 /** Download original CDN media (image/video). */
@@ -154,9 +231,10 @@ export async function transferCdnToR2(options: {
     });
     const key = options.objectKey || objectKey(options.mediaRecordId, detected.ext);
     const contentType = storedContentType(headerType, detected);
-    await client().send(
+    const stored = await openR2();
+    await stored.s3.send(
       new PutObjectCommand({
-        Bucket: bucketName(),
+        Bucket: stored.bucket,
         Key: key,
         Body: Readable.fromWeb(webBody as import("node:stream/web").ReadableStream),
         ContentType: contentType,
@@ -168,7 +246,7 @@ export async function transferCdnToR2(options: {
       key,
       bytes: contentLength,
       contentType,
-      publicUrl: publicUrl(key),
+      publicUrl: publicUrl(stored.publicBase, key),
       kind: detected.kind,
       fileType: detected.fileType,
     };
@@ -183,9 +261,10 @@ export async function transferCdnToR2(options: {
   });
   const key = options.objectKey || objectKey(options.mediaRecordId, detected.ext);
   const contentType = storedContentType(headerType, detected, body);
-  await client().send(
+  const stored = await openR2();
+  await stored.s3.send(
     new PutObjectCommand({
-      Bucket: bucketName(),
+      Bucket: stored.bucket,
       Key: key,
       Body: body,
       ContentType: contentType,
@@ -198,7 +277,7 @@ export async function transferCdnToR2(options: {
     key,
     bytes,
     contentType,
-    publicUrl: publicUrl(key),
+    publicUrl: publicUrl(stored.publicBase, key),
     kind: detected.kind,
     fileType: detected.fileType,
   };
@@ -210,9 +289,10 @@ export async function uploadToR2(options: {
   body: Buffer;
   contentType: string;
 }): Promise<{ key: string; publicUrl: string; bytes: number }> {
-  await client().send(
+  const stored = await openR2();
+  await stored.s3.send(
     new PutObjectCommand({
-      Bucket: bucketName(),
+      Bucket: stored.bucket,
       Key: options.key,
       Body: options.body,
       ContentType: options.contentType,
@@ -224,7 +304,7 @@ export async function uploadToR2(options: {
   return {
     key: options.key,
     bytes: options.body.length,
-    publicUrl: publicUrl(options.key),
+    publicUrl: publicUrl(stored.publicBase, options.key),
   };
 }
 
@@ -357,9 +437,12 @@ function objectKey(mediaRecordId: string, ext: string): string {
   return `social-hub/${mediaRecordId}/${Date.now()}.${ext}`;
 }
 
-function keyFromPublicUrl(url: string): string | null {
-  if (!isHostedMediaUrl(url)) return null;
-  const base = publicBase().replace(/\/$/, "");
+async function keyFromPublicUrl(url: string): Promise<string | null> {
+  if (!(await isHostedMediaUrl(url))) return null;
+  const base = (
+    (await getAppSecret(connectionsEnv(), "r2_public_base_url"))?.trim() ||
+    DEFAULT_R2_PUBLIC_BASE
+  ).replace(/\/$/, "");
   const key = url.slice(base.length + 1).split("?")[0];
   return key || null;
 }
@@ -395,7 +478,7 @@ export async function copyHostedObject(options: {
   ext: string;
   contentType: string;
 }): Promise<{ publicUrl: string; key: string; sourceKey: string; copied: boolean }> {
-  const sourceKey = keyFromPublicUrl(options.sourceUrl);
+  const sourceKey = await keyFromPublicUrl(options.sourceUrl);
   if (!sourceKey) throw new Error(`Not a hosted media URL: ${options.sourceUrl}`);
   const destKey = keyWithExt(sourceKey, options.ext);
   if (destKey === sourceKey) {
@@ -406,23 +489,24 @@ export async function copyHostedObject(options: {
       copied: false,
     };
   }
-  const bucket = bucketName();
-  await client().send(
+  const stored = await openR2();
+  await stored.s3.send(
     new CopyObjectCommand({
-      Bucket: bucket,
-      CopySource: `${bucket}/${sourceKey}`,
+      Bucket: stored.bucket,
+      CopySource: `${stored.bucket}/${sourceKey}`,
       Key: destKey,
       ContentType: options.contentType,
       MetadataDirective: "REPLACE",
     }),
   );
-  return { publicUrl: publicUrl(destKey), key: destKey, sourceKey, copied: true };
+  return { publicUrl: publicUrl(stored.publicBase, destKey), key: destKey, sourceKey, copied: true };
 }
 
 export async function deleteHostedKey(key: string): Promise<void> {
-  await client().send(
+  const stored = await openR2();
+  await stored.s3.send(
     new DeleteObjectCommand({
-      Bucket: bucketName(),
+      Bucket: stored.bucket,
       Key: key,
     }),
   );

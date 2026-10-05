@@ -24,6 +24,8 @@ type ScrapeResult = {
   cached?: boolean;
   creditsRemaining?: number;
   creditsCharged?: number;
+  provider_used?: string;
+  fallback?: boolean;
   profile?: {
     name?: string;
     handle?: string;
@@ -153,7 +155,7 @@ export function PullPage() {
         <div className="grid gap-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Profile</CardTitle>
+              <CardTitle className="text-base">User</CardTitle>
             </CardHeader>
             <CardContent className="flex items-center gap-3">
               <Avatar className="size-12">
@@ -185,6 +187,12 @@ export function PullPage() {
                   <Badge variant="outline">{result.saveMode}</Badge>
                 ) : null}
                 {result.cached ? <Badge>cache hit</Badge> : null}
+                {result.provider_used ? (
+                  <Badge variant="outline">
+                    {result.provider_used}
+                    {result.fallback ? " · fallback" : ""}
+                  </Badge>
+                ) : null}
               </div>
               <div className="pt-2">
                 <ExpandableText

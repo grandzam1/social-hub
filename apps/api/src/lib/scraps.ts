@@ -68,7 +68,7 @@ function preferUrl(...urls: Array<string | undefined>) {
   return urls.find((u) => u && /^https?:\/\//i.test(u));
 }
 
-function profileAvatar(profile?: AirtableRecord): string | undefined {
+async function profileAvatar(profile?: AirtableRecord): Promise<string | undefined> {
   if (!profile) return undefined;
   const f = profile.fields;
   const raw = preferUrl(
@@ -77,7 +77,7 @@ function profileAvatar(profile?: AirtableRecord): string | undefined {
     asStr(f["Profile image"]),
     asStr(f.Photo),
   );
-  if (raw && isHostedMediaUrl(raw)) return raw;
+  if (raw && (await isHostedMediaUrl(raw))) return raw;
   const handle = asStr(f.Handle);
   const platform = asStr(f.Platform);
   if (!raw || !handle || !platform) return undefined;
@@ -118,18 +118,18 @@ async function buildJoinedItems(): Promise<{
     }
   }
 
-  function resolveAvatar(post?: AirtableRecord, user?: string, platform?: string) {
+  async function resolveAvatar(post?: AirtableRecord, user?: string, platform?: string) {
     const linked = Array.isArray(post?.fields.Profile)
       ? (post!.fields.Profile as string[])
       : [];
     if (linked[0] && profilesById.has(linked[0])) {
-      return profileAvatar(profilesById.get(linked[0]));
+      return await profileAvatar(profilesById.get(linked[0]));
     }
     if (user) {
       const key = `${(platform || "").toLowerCase()}:${normalizeHandle(user)}`;
       return (
-        profileAvatar(profilesByHandle.get(key)) ||
-        profileAvatar(profilesByHandle.get(normalizeHandle(user)))
+        (await profileAvatar(profilesByHandle.get(key))) ||
+        (await profileAvatar(profilesByHandle.get(normalizeHandle(user))))
       );
     }
     return undefined;
@@ -166,7 +166,7 @@ async function buildJoinedItems(): Promise<{
       savedCopy,
       saveStatus,
       user,
-      avatarUrl: resolveAvatar(post, user, platform),
+      avatarUrl: await resolveAvatar(post, user, platform),
       platform,
       postLink: asStr(post?.fields.Link),
       postRecordId: post?.id,
@@ -191,7 +191,7 @@ async function buildJoinedItems(): Promise<{
       kind: "text",
       text,
       user,
-      avatarUrl: resolveAvatar(p, user, platform),
+      avatarUrl: await resolveAvatar(p, user, platform),
       platform,
       postLink: asStr(p.fields.Link),
       postRecordId: p.id,

@@ -25,7 +25,10 @@ vaultRoutes.get("/env", async (c) => {
   const match = /^Bearer\s+(\S+)$/.exec(header);
   if (!match) return c.json({ error: "Unauthorized" }, 401);
   try {
-    const result = await readVaultEnv(c.env, match[1]);
+    const result = await readVaultEnv(c.env, match[1], {
+      service: c.req.query("service") ?? "",
+      name: c.req.query("name") ?? "",
+    });
     if (!result) return c.json({ error: "Unauthorized" }, 401);
     return c.json(result);
   } catch (err) {
@@ -68,10 +71,10 @@ vaultRoutes.post("/tokens", async (c) => {
 
 vaultRoutes.get("/tokens/:id/reveal", async (c) => {
   const id = c.req.param("id");
-  if (!ID_PATTERN.test(id)) return c.json({ ok: false, error: "Token not found" }, 404);
+  if (!ID_PATTERN.test(id)) return c.json({ ok: false, error: "Access token not found" }, 404);
   try {
     const value = await revealProjectToken(c.env, id);
-    if (value == null) return c.json({ ok: false, error: "Token not found" }, 404);
+    if (value == null) return c.json({ ok: false, error: "Access token not found" }, 404);
     return c.json({ ok: true, value });
   } catch (err) {
     const failed = failure(err);
@@ -81,10 +84,10 @@ vaultRoutes.get("/tokens/:id/reveal", async (c) => {
 
 vaultRoutes.post("/tokens/:id/refresh", async (c) => {
   const id = c.req.param("id");
-  if (!ID_PATTERN.test(id)) return c.json({ ok: false, error: "Token not found" }, 404);
+  if (!ID_PATTERN.test(id)) return c.json({ ok: false, error: "Access token not found" }, 404);
   try {
     const token = await refreshProjectToken(c.env, id);
-    if (!token) return c.json({ ok: false, error: "Token not found" }, 404);
+    if (!token) return c.json({ ok: false, error: "Access token not found" }, 404);
     return c.json({ ok: true, token });
   } catch (err) {
     const failed = failure(err);
@@ -94,10 +97,10 @@ vaultRoutes.post("/tokens/:id/refresh", async (c) => {
 
 vaultRoutes.delete("/tokens/:id", async (c) => {
   const id = c.req.param("id");
-  if (!ID_PATTERN.test(id)) return c.json({ ok: false, error: "Token not found" }, 404);
+  if (!ID_PATTERN.test(id)) return c.json({ ok: false, error: "Access token not found" }, 404);
   try {
     const deleted = await deleteProjectToken(c.env, id);
-    if (!deleted) return c.json({ ok: false, error: "Token not found" }, 404);
+    if (!deleted) return c.json({ ok: false, error: "Access token not found" }, 404);
     return c.json({ ok: true });
   } catch (err) {
     const failed = failure(err);

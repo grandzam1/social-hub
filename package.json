@@ -6,7 +6,7 @@
     "dev:api": "npm run dev --prefix apps/api",
     "dev:web": "npm run dev --prefix apps/web",
     "build:web": "npm run build --prefix apps/web",
-    "build:admin": "VITE_BASE=/admin/ npm run build --prefix apps/web && node -e \"const fs=require('fs');const p='apps/api/public/admin';fs.rmSync(p,{recursive:true,force:true});fs.cpSync('apps/web/dist',p,{recursive:true});console.log('Copied admin →',p)\"",
+    "build:admin": "npm run build --prefix apps/web && node -e \"const fs=require('fs');const p='apps/api/public/admin';fs.rmSync(p,{recursive:true,force:true});fs.cpSync('apps/web/dist',p,{recursive:true});console.log('Copied admin →',p)\"",
     "install:web": "npm install --prefix apps/web",
     "save-media": "node scripts/automate-save-media.mjs",
     "save-media:sync": "node scripts/automate-save-media.mjs --sync",

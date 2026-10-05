@@ -7,11 +7,17 @@ import { defineConfig } from "vite";
 const root = path.dirname(fileURLToPath(import.meta.url));
 
 // Production deploy mounts the SPA under /admin/ on the same Worker as the API.
-const base = process.env.VITE_BASE || "/";
+// Default the production build to that path so Windows deploys (where a
+// `VITE_BASE=...` npm-script prefix is ignored) still emit /admin/assets/*.
+function resolveBase(command: "build" | "serve"): string {
+  const fromEnv = process.env.VITE_BASE?.trim();
+  if (fromEnv) return fromEnv;
+  return command === "build" ? "/admin/" : "/";
+}
 
 // https://vite.dev/config/
-export default defineConfig({
-  base,
+export default defineConfig(({ command }) => ({
+  base: resolveBase(command),
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -35,4 +41,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

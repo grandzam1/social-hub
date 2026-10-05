@@ -1,5 +1,6 @@
 import { connectionsEnv } from "../../connections/runtime.js";
-import { getConnection, type ConnectionsEnv } from "../../connections/index.js";
+import type { ConnectionsEnv } from "../../connections/index.js";
+import { getAppSecret } from "../../connections/secrets.js";
 import type { AirtableRecord, Catalog, CatalogPage } from "../types.js";
 
 const REST = "/rest/v1";
@@ -30,16 +31,25 @@ function redact(text: string): string {
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]");
 }
 
+export async function assertSupabaseConfigured(env: ConnectionsEnv): Promise<void> {
+  const storedUrl = (await getAppSecret(env, "supabase_url"))?.trim();
+  const storedKey = (await getAppSecret(env, "supabase_secret_key"))?.trim();
+  const missing: string[] = [];
+  if (!storedUrl) missing.push("SUPABASE_URL");
+  if (!storedKey) missing.push("SUPABASE_SECRET_KEY");
+  if (missing.length) {
+    throw new Error(
+      `Missing ${missing.join(" and ")}. Set ${missing.join(" and ")}, or choose Airtable for the database setting. Switching does not move data.`,
+    );
+  }
+}
+
 async function credentials(env: ConnectionsEnv): Promise<{ url: string; key: string }> {
-  const storedUrl = (await getConnection(env, "social-hub", "supabase_url"))?.trim();
-  const storedKey = (await getConnection(env, "social-hub", "supabase_secret_key"))?.trim();
-  const url = (storedUrl || process.env.SUPABASE_URL || "")
-    .trim()
-    .replace(/\/+$/, "")
-    .replace(/\/rest\/v1$/, "");
-  const key = (storedKey || process.env.SUPABASE_SECRET_KEY || "").trim();
-  if (!url) throw new Error("Missing supabase_url");
-  if (!key) throw new Error("Missing supabase_secret_key");
+  await assertSupabaseConfigured(env);
+  const storedUrl = (await getAppSecret(env, "supabase_url"))?.trim() ?? "";
+  const storedKey = (await getAppSecret(env, "supabase_secret_key"))?.trim() ?? "";
+  const url = storedUrl.replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+  const key = storedKey;
   return { url, key };
 }
 
