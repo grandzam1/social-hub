@@ -45,6 +45,14 @@ import { useMediaAutoplay } from "@/hooks/use-media-autoplay";
 import { displayHandle, fetchJson, fmtWhen, hiResAvatar } from "@/lib/api";
 import { normalizeCaption } from "@/lib/caption";
 import { usePrefsStore } from "@/lib/prefs";
+import { DownloadProgress } from "@/components/download-progress";
+import {
+  downloadPercent,
+  downloadWithProgress,
+  overallDownloadPercent,
+  saveBlobToDevice,
+  type DownloadStatus,
+} from "@/lib/download-file";
 import { cn } from "@/lib/utils";
 
 const FEED_PAGE_SIZE = 15;
@@ -180,16 +188,6 @@ function mimeFor(name: string, kind: ScrapKind) {
   return "image/jpeg";
 }
 
-function triggerDownload(href: string, name: string) {
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = name;
-  a.rel = "noreferrer";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
 /** Media already sent to the device during this visit. */
 const savedToDevice = new Set<string>();
 
@@ -222,37 +220,11 @@ function canShareFiles() {
   );
 }
 
-/** Small files may be shared from memory. Videos and anything larger download to disk. */
-const MEMORY_SAVE_MAX_BYTES = 8 * 1024 * 1024;
-
 function downloadEndpoint(url: string) {
   return `/api/media/download?url=${encodeURIComponent(url)}`;
 }
 
-async function hostedByteLength(url: string): Promise<number | null> {
-  try {
-    const res = await fetch(downloadEndpoint(url), { method: "HEAD" });
-    if (!res.ok) return null;
-    const raw = res.headers.get("content-length") || res.headers.get("x-media-bytes");
-    if (!raw) return null;
-    const bytes = Number(raw);
-    if (!Number.isFinite(bytes) || bytes < 0) return null;
-    return bytes;
-  } catch {
-    return null;
-  }
-}
-
-function canLoadIntoMemory(kind: ScrapKind, bytes: number | null) {
-  if (kind === "video") return false;
-  if (bytes == null) return false;
-  return bytes <= MEMORY_SAVE_MAX_BYTES;
-}
-
-async function fileFromSavedUrl(url: string, kind: ScrapKind, name: string) {
-  const res = await fetch(downloadEndpoint(url));
-  if (!res.ok) throw new Error("Could not fetch media");
-  const blob = await res.blob();
+function fileFromBlob(blob: Blob, kind: ScrapKind, name: string) {
   const type =
     blob.type && blob.type !== "application/octet-stream"
       ? blob.type
@@ -260,13 +232,12 @@ async function fileFromSavedUrl(url: string, kind: ScrapKind, name: string) {
   return new File([blob], name, { type });
 }
 
-async function saveMediaToDevice(url: string, kind: ScrapKind) {
-  const name = fileNameFromUrl(url, kind);
-  if (!canShareFiles()) {
-    triggerDownload(downloadEndpoint(url), name);
+async function deliverBlob(blob: Blob, kind: ScrapKind, name: string, share: boolean) {
+  if (!share || !canShareFiles()) {
+    saveBlobToDevice(blob, name);
     return;
   }
-  const file = await fileFromSavedUrl(url, kind, name);
+  const file = fileFromBlob(blob, kind, name);
   const shareData = { files: [file], title: "Save media" };
   if (navigator.canShare(shareData)) {
     try {
@@ -280,9 +251,7 @@ async function saveMediaToDevice(url: string, kind: ScrapKind) {
       if (canceled) throw err;
     }
   }
-  const objectUrl = URL.createObjectURL(file);
-  triggerDownload(objectUrl, name);
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+  saveBlobToDevice(file, name);
 }
 
 function KindTag({ kind }: { kind: ScrapKind }) {
@@ -307,6 +276,8 @@ function MediaSlide({
   onOpen?: () => void;
   watch?: boolean;
 }) {
+  const autoplay = usePrefsStore((s) => s.autoplay);
+  const feedAutoplay = autoplay && !watch;
   const src = savedHref(item);
   const frame = cn(
     "relative flex h-full w-full items-center justify-center overflow-hidden bg-muted",
@@ -368,7 +339,8 @@ function MediaSlide({
             playsInline
             muted={watch ? undefined : true}
             preload="metadata"
-            controls
+            loop={feedAutoplay}
+            controls={!feedAutoplay}
             poster={item.previewUrl || undefined}
             src={src}
           />
@@ -464,10 +436,25 @@ function PostMenu({
   );
 }
 
+type SaveRowStatus =
+  | "not-ready"
+  | "already"
+  | "queued"
+  | DownloadStatus;
+
 type SaveRow = {
   id: string;
   label: string;
-  detail: string;
+  status: SaveRowStatus;
+  percent: number;
+  total: number;
+};
+
+type SingleTransfer = {
+  status: DownloadStatus;
+  label: string;
+  percent: number;
+  total: number;
 };
 
 function planSaveRows(media: ScrapItem[]): SaveRow[] {
@@ -476,14 +463,34 @@ function planSaveRows(media: ScrapItem[]): SaveRow[] {
     const src = savedHref(item);
     const id = mediaKey(item, index);
     const label = `${item.kind} ${index + 1}`;
-    if (!src) return { id, label, detail: "Not ready" };
+    const blank = { id, label, percent: 0, total: 0 };
+    if (!src) return { ...blank, status: "not-ready" as const };
     const duplicate = seenUrls.has(src);
     seenUrls.add(src);
     if (savedToDevice.has(id) || duplicate) {
-      return { id, label, detail: "Already saved" };
+      return { ...blank, status: "already" as const };
     }
-    return { id, label, detail: "Ready" };
+    return { ...blank, status: "queued" as const };
   });
+}
+
+function rowStatusText(row: SaveRow): string {
+  if (row.status === "not-ready") return "Not ready";
+  if (row.status === "already") return "Already saved";
+  if (row.status === "queued") return "Queued";
+  if (row.status === "preparing") return "Preparing download…";
+  if (row.status === "downloading") {
+    return row.total > 0 ? `Downloading… ${row.percent}%` : "Downloading…";
+  }
+  if (row.status === "saving") return "Saving to device…";
+  if (row.status === "done") return "Saved";
+  return "Download failed";
+}
+
+function kindWord(kind: ScrapKind) {
+  if (kind === "video") return "video";
+  if (kind === "image") return "image";
+  return kind;
 }
 
 function SaveMediaButton({
@@ -493,10 +500,10 @@ function SaveMediaButton({
   media: ScrapItem[];
   className?: string;
 }) {
-  const [label, setLabel] = useState("Save");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<SaveRow[]>([]);
+  const [transfer, setTransfer] = useState<SingleTransfer | null>(null);
   const saveAction = usePrefsStore((s) => s.saveAction);
   const many = media.length > 1;
   const single = media[0];
@@ -505,144 +512,141 @@ function SaveMediaButton({
     ? media.some((item) => Boolean(savedHref(item)))
     : Boolean(singleSrc);
 
+  function patchRow(id: string, patch: Partial<SaveRow>) {
+    setRows((current) =>
+      current.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    );
+  }
+
+  async function transferItem(
+    item: ScrapItem,
+    src: string,
+    name: string,
+    onUpdate: (patch: { status: DownloadStatus; percent: number; total: number }) => void,
+  ) {
+    onUpdate({ status: "preparing", percent: 0, total: 0 });
+    const blob = await downloadWithProgress(downloadEndpoint(src), (loaded, total) => {
+      onUpdate({
+        status: "downloading",
+        percent: downloadPercent(loaded, total) ?? 0,
+        total,
+      });
+    });
+    onUpdate({
+      status: "saving",
+      percent: blob.size > 0 ? 100 : 0,
+      total: blob.size > 0 ? blob.size : 0,
+    });
+    await deliverBlob(blob, item.kind, name, saveAction === "share" && item.kind !== "video");
+    onUpdate({ status: "done", percent: 100, total: 1 });
+  }
+
   async function saveOne() {
     if (!single || !singleSrc || busy) return;
     setBusy(true);
-    setLabel("Preparing…");
+    const word = kindWord(single.kind);
+    setTransfer({
+      status: "preparing",
+      label: "Preparing download…",
+      percent: 0,
+      total: 0,
+    });
     try {
-      if (saveAction === "download") {
-        triggerDownload(
-          downloadEndpoint(singleSrc),
-          fileNameFromUrl(singleSrc, single.kind),
-        );
-      } else {
-        await saveMediaToDevice(singleSrc, single.kind);
-      }
+      await transferItem(single, singleSrc, fileNameFromUrl(singleSrc, single.kind), (patch) => {
+        setTransfer((current) => {
+          const status = patch.status ?? current?.status ?? "downloading";
+          const total = patch.total ?? current?.total ?? 0;
+          const percent = patch.percent ?? current?.percent ?? 0;
+          const label =
+            status === "preparing"
+              ? "Preparing download…"
+              : status === "downloading"
+                ? `Downloading ${word}…`
+                : status === "saving"
+                  ? "Saving to device…"
+                  : "Saved";
+          return { status, label, percent, total };
+        });
+      });
       savedToDevice.add(mediaKey(single, 0));
-      setLabel("Saved");
-      window.setTimeout(() => setLabel("Save"), 1400);
+      setTransfer({ status: "done", label: "Saved", percent: 100, total: 1 });
+      window.setTimeout(() => setTransfer(null), 1400);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setLabel("Save");
+        setTransfer(null);
       } else {
-        setLabel("Try again");
-        window.setTimeout(() => setLabel("Save"), 1400);
+        setTransfer({
+          status: "failed",
+          label: "Download failed",
+          percent: 0,
+          total: 0,
+        });
       }
     } finally {
       setBusy(false);
     }
   }
 
-  async function saveAll() {
-    if (busy) return;
-    const planned = planSaveRows(media);
-    const queue = planned
-      .map((row, index) => ({ row, item: media[index]! }))
-      .filter((entry) => entry.row.detail === "Ready");
-    if (!queue.length) return;
-
-    setBusy(true);
+  async function saveQueue(
+    queue: Array<{ row: SaveRow; item: ScrapItem }>,
+  ) {
     const names = new Set<string>();
     let activeId = "";
-
-    const mark = (id: string, detail: string) => {
-      setRows((current) =>
-        current.map((row) => (row.id === id ? { ...row, detail } : row)),
-      );
-    };
-
     try {
-      if (saveAction === "download") {
-        for (const entry of queue) {
-          const src = savedHref(entry.item);
-          const name = uniqueFileName(
-            fileNameFromUrl(src, entry.item.kind),
-            names,
-          );
-          mark(entry.row.id, "Saving…");
-          triggerDownload(downloadEndpoint(src), name);
-          savedToDevice.add(entry.row.id);
-          mark(entry.row.id, "Saved");
-        }
-        return;
-      }
-
-      const shareable = canShareFiles();
-      const memoryQueue: typeof queue = [];
-      const diskQueue: typeof queue = [];
       for (const entry of queue) {
         const src = savedHref(entry.item);
-        if (!shareable || entry.item.kind === "video") {
-          diskQueue.push(entry);
-          continue;
-        }
-        const bytes = await hostedByteLength(src);
-        if (canLoadIntoMemory(entry.item.kind, bytes)) memoryQueue.push(entry);
-        else diskQueue.push(entry);
-      }
-      activeId = "";
-
-      for (const entry of diskQueue) {
-        const src = savedHref(entry.item);
-        const name = uniqueFileName(
-          fileNameFromUrl(src, entry.item.kind),
-          names,
-        );
-        mark(entry.row.id, "Saving…");
-        triggerDownload(downloadEndpoint(src), name);
+        if (!src) continue;
+        activeId = entry.row.id;
+        const name = uniqueFileName(fileNameFromUrl(src, entry.item.kind), names);
+        await transferItem(entry.item, src, name, (patch) => patchRow(entry.row.id, patch));
         savedToDevice.add(entry.row.id);
-        mark(entry.row.id, "Saved");
-      }
-
-      if (memoryQueue.length) {
-        const shareFiles: File[] = [];
-        const savedIds: string[] = [];
-        for (const entry of memoryQueue) {
-          activeId = entry.row.id;
-          mark(activeId, "Saving…");
-          const src = savedHref(entry.item);
-          const name = uniqueFileName(
-            fileNameFromUrl(src, entry.item.kind),
-            names,
-          );
-          shareFiles.push(await fileFromSavedUrl(src, entry.item.kind, name));
-          savedIds.push(entry.row.id);
-        }
         activeId = "";
-        const shareData = { files: shareFiles, title: "Save media" };
-        let shared = false;
-        if (navigator.canShare?.(shareData)) {
-          try {
-            await navigator.share(shareData);
-            shared = true;
-          } catch (err) {
-            const canceled =
-              err instanceof DOMException && err.name === "AbortError";
-            if (canceled) throw err;
-          }
-        }
-        if (!shared) {
-          for (const file of shareFiles) {
-            const objectUrl = URL.createObjectURL(file);
-            triggerDownload(objectUrl, file.name);
-            window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
-          }
-        }
-        for (const id of savedIds) {
-          savedToDevice.add(id);
-          mark(id, "Saved");
-        }
       }
     } catch (err) {
-      const canceled =
-        err instanceof DOMException && err.name === "AbortError";
+      const canceled = err instanceof DOMException && err.name === "AbortError";
       setRows((current) =>
         current.map((row) => {
-          if (!canceled && row.id === activeId) return { ...row, detail: "Failed" };
-          if (row.detail === "Saving…") return { ...row, detail: "Ready" };
+          if (!canceled && row.id === activeId) {
+            return { ...row, status: "failed", percent: 0, total: 0 };
+          }
+          if (
+            row.status === "preparing" ||
+            row.status === "downloading" ||
+            row.status === "saving"
+          ) {
+            return { ...row, status: "queued", percent: 0, total: 0 };
+          }
           return row;
         }),
       );
+    }
+  }
+
+  async function saveAll() {
+    if (busy) return;
+    const planned = rows.length ? rows : planSaveRows(media);
+    if (!rows.length) setRows(planned);
+    const queue = planned
+      .map((row, index) => ({ row, item: media[index]! }))
+      .filter((entry) => entry.row.status === "queued" || entry.row.status === "failed");
+    if (!queue.length) return;
+    setBusy(true);
+    try {
+      await saveQueue(queue);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryRow(id: string) {
+    if (busy) return;
+    const index = rows.findIndex((row) => row.id === id);
+    const item = media[index];
+    const row = rows[index];
+    if (!item || !row) return;
+    setBusy(true);
+    try {
+      await saveQueue([{ row, item }]);
     } finally {
       setBusy(false);
     }
@@ -658,34 +662,59 @@ function SaveMediaButton({
     void saveOne();
   }
 
-  const readyCount = rows.filter((row) => row.detail === "Ready").length;
-  const savedCount = rows.filter((row) => row.detail === "Saved").length;
-  const batchCount = rows.filter((row) =>
-    row.detail === "Ready" ||
-    row.detail === "Saving…" ||
-    row.detail === "Saved" ||
-    row.detail === "Failed",
+  const work = rows.filter(
+    (row) => row.status !== "not-ready" && row.status !== "already",
+  );
+  const readyCount = work.filter(
+    (row) => row.status === "queued" || row.status === "failed",
   ).length;
-  const finishedOrActive = rows.filter(
-    (row) => row.detail === "Saving…" || row.detail === "Saved",
-  ).length;
-  const progress = busy
-    ? `Saving ${Math.min(Math.max(finishedOrActive, 1), batchCount || media.length)} of ${batchCount || media.length}`
+  const savedCount = work.filter((row) => row.status === "done").length;
+  const activeIndex = work.findIndex(
+    (row) =>
+      row.status === "preparing" ||
+      row.status === "downloading" ||
+      row.status === "saving",
+  );
+  const active = activeIndex >= 0 ? work[activeIndex] : undefined;
+  const activePercent =
+    active && active.total > 0
+      ? active.status === "saving"
+        ? 100
+        : active.percent
+      : active
+        ? null
+        : 0;
+  const overall = overallDownloadPercent(savedCount, activePercent, work.length);
+  const filePosition = active ? activeIndex + 1 : Math.min(savedCount + 1, work.length);
+  const countLine = busy
+    ? `Saving ${filePosition} of ${work.length || media.length}`
     : savedCount
-      ? `Saved ${savedCount} of ${media.length}`
+      ? `Saved ${savedCount} of ${work.length}`
       : `${media.length} files in this post`;
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        className={cn("h-11 min-w-[4.5rem] rounded-full", className)}
-        disabled={!canSave || busy}
-        onClick={onClick}
-      >
-        {many ? "Save" : label}
-      </Button>
+      {transfer && !many ? (
+        <div className="w-56 max-w-full">
+          <DownloadProgress
+            status={transfer.status}
+            percent={transfer.percent}
+            total={transfer.total}
+            label={transfer.label}
+            onRetry={transfer.status === "failed" ? () => void saveOne() : undefined}
+          />
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          className={cn("h-11 min-w-[4.5rem] rounded-full", className)}
+          disabled={!canSave || busy}
+          onClick={onClick}
+        >
+          Save
+        </Button>
+      )}
       {many ? (
         <Sheet
           open={open}
@@ -702,9 +731,39 @@ function SaveMediaButton({
             <SheetHeader>
               <SheetTitle>Save all media?</SheetTitle>
               <SheetDescription>
-                {progress}. Files already saved are skipped.
+                {countLine}. Files already saved are skipped.
               </SheetDescription>
             </SheetHeader>
+            {active ? (
+              <div className="space-y-3 px-4 pb-2">
+                <DownloadProgress
+                  status={
+                    active.status === "downloading" ||
+                    active.status === "saving" ||
+                    active.status === "preparing"
+                      ? active.status
+                      : "preparing"
+                  }
+                  percent={active.percent}
+                  total={active.total}
+                  label={
+                    active.status === "downloading"
+                      ? `Downloading ${active.label}…`
+                      : active.status === "saving"
+                        ? "Saving to device…"
+                        : active.status === "failed"
+                          ? "Download failed"
+                          : "Preparing download…"
+                  }
+                />
+                <DownloadProgress
+                  status="downloading"
+                  percent={overall ?? 0}
+                  total={overall == null ? 0 : 1}
+                  label={overall == null ? "Overall" : "Overall:"}
+                />
+              </div>
+            ) : null}
             <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto px-4" aria-live="polite">
               {rows.map((row) => (
                 <li
@@ -712,15 +771,29 @@ function SaveMediaButton({
                   className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 font-mono text-xs"
                 >
                   <span className="capitalize text-foreground">{row.label}</span>
-                  <span
-                    className={cn(
-                      "text-muted-foreground",
-                      row.detail === "Saved" && "text-foreground",
-                      row.detail === "Failed" && "text-destructive",
-                      row.detail === "Saving…" && "text-foreground",
-                    )}
-                  >
-                    {row.detail}
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "text-muted-foreground",
+                        row.status === "done" && "text-foreground",
+                        row.status === "failed" && "text-destructive",
+                        (row.status === "downloading" || row.status === "saving") &&
+                          "text-foreground",
+                      )}
+                    >
+                      {rowStatusText(row)}
+                    </span>
+                    {row.status === "failed" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void retryRow(row.id)}
+                      >
+                        Retry
+                      </Button>
+                    ) : null}
                   </span>
                 </li>
               ))}
