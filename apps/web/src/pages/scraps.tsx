@@ -44,7 +44,10 @@ import { ExpandableText } from "@/components/expandable-text";
 import { useMediaAutoplay } from "@/hooks/use-media-autoplay";
 import { displayHandle, fetchJson, fmtWhen, hiResAvatar } from "@/lib/api";
 import { normalizeCaption } from "@/lib/caption";
+import { usePrefsStore } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
+
+const FEED_PAGE_SIZE = 15;
 
 type ScrapKind = "text" | "image" | "video";
 
@@ -493,6 +496,7 @@ function SaveMediaButton({
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<SaveRow[]>([]);
+  const saveAction = usePrefsStore((s) => s.saveAction);
   const many = media.length > 1;
   const single = media[0];
   const singleSrc = single ? savedHref(single) : "";
@@ -505,7 +509,14 @@ function SaveMediaButton({
     setBusy(true);
     setLabel("Preparing…");
     try {
-      await saveMediaToDevice(singleSrc, single.kind);
+      if (saveAction === "download") {
+        triggerDownload(
+          downloadEndpoint(singleSrc),
+          fileNameFromUrl(singleSrc, single.kind),
+        );
+      } else {
+        await saveMediaToDevice(singleSrc, single.kind);
+      }
       savedToDevice.add(mediaKey(single, 0));
       setLabel("Saved");
       window.setTimeout(() => setLabel("Save"), 1400);
@@ -540,6 +551,21 @@ function SaveMediaButton({
     };
 
     try {
+      if (saveAction === "download") {
+        for (const entry of queue) {
+          const src = savedHref(entry.item);
+          const name = uniqueFileName(
+            fileNameFromUrl(src, entry.item.kind),
+            names,
+          );
+          mark(entry.row.id, "Saving…");
+          triggerDownload(downloadEndpoint(src), name);
+          savedToDevice.add(entry.row.id);
+          mark(entry.row.id, "Saved");
+        }
+        return;
+      }
+
       const shareable = canShareFiles();
       const memoryQueue: typeof queue = [];
       const diskQueue: typeof queue = [];
@@ -1171,6 +1197,13 @@ export function ScrapsPage() {
   }, [error, load]);
 
   const posts = useMemo(() => groupPosts(items), [items]);
+  const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
+  const visiblePosts = posts.slice(0, visibleCount);
+  const hiddenCount = Math.max(0, posts.length - visiblePosts.length);
+
+  useEffect(() => {
+    setVisibleCount(FEED_PAGE_SIZE);
+  }, [type, user, qDebounced]);
   const [view, setView] = useState<{ key: string; index: number } | null>(null);
   const viewPost = view ? posts.find((post) => post.key === view.key) ?? null : null;
 
@@ -1266,7 +1299,7 @@ export function ScrapsPage() {
         </p>
       ) : posts.length === 0 ? null : (
         <div className="flex flex-col gap-4">
-          {posts.map((post) => (
+          {visiblePosts.map((post) => (
             <ScrapCard
               key={post.key}
               post={post}
@@ -1274,6 +1307,16 @@ export function ScrapsPage() {
               onView={(index) => setView({ key: post.key, index })}
             />
           ))}
+          {hiddenCount > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="self-center rounded-full"
+              onClick={() => setVisibleCount((count) => count + FEED_PAGE_SIZE)}
+            >
+              Load more
+            </Button>
+          ) : null}
         </div>
       )}
       {view && viewPost ? (
