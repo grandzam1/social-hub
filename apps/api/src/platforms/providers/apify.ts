@@ -9,6 +9,7 @@ import type {
   NormalizedScrape,
   Platform,
 } from "../../lib/types.js";
+import { posterSourceUrl } from "../../lib/save-poster.js";
 import type { ScrapeProvider } from "../types.js";
 
 const PROJECT = "social-hub";
@@ -122,7 +123,12 @@ function postInput(platform: Platform, url: string): Record<string, unknown> {
     return { directUrls: [url], resultsType: "posts", resultsLimit: 1 };
   }
   if (platform === "tiktok") {
-    return { postURLs: [url], resultsPerPage: 1, shouldDownloadVideos: true };
+    return {
+      postURLs: [url],
+      resultsPerPage: 1,
+      shouldDownloadVideos: true,
+      shouldDownloadCovers: true,
+    };
   }
   return { startUrls: [url], maxItems: 1 };
 }
@@ -274,10 +280,16 @@ export function normalizeApifyTikTok(
     asStr(raw.videoUrl) ||
     asStr(video.downloadAddr) ||
     asStr(video.playUrl);
+  const coverCandidates = [
+    asStr(video.coverUrl),
+    asStr(video.originalCoverUrl),
+    asStr(raw.coverUrl),
+  ].filter((item): item is string => Boolean(item));
   const cover =
-    asStr(video.coverUrl) ||
-    asStr(video.originalCoverUrl) ||
-    asStr(raw.coverUrl);
+    posterSourceUrl({
+      apifyCover: coverCandidates.find((item) => item.includes("api.apify.com")),
+      cdnCover: coverCandidates.find((item) => !item.includes("api.apify.com")),
+    }) || undefined;
   const media: NormalizedMedia[] = [];
   if (fileUrl) {
     media.push({

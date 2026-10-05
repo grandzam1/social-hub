@@ -36,7 +36,9 @@ export function useMediaAutoplay(rootRef?: React.RefObject<HTMLElement | null>) 
             const video = entry.target as HTMLVideoElement;
             prep(video);
             if (entry.isIntersecting && entry.intersectionRatio >= 0.45) {
-              void video.play().catch(() => {});
+              void video.play().catch(() => {
+                video.controls = true;
+              });
             } else {
               video.pause();
             }

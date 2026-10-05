@@ -362,13 +362,14 @@ function MediaSlide({
     return (
       <div className={frame}>
           <video
-            className="max-h-full max-w-full object-contain"
+            className="max-h-full max-w-full bg-black object-contain"
             {...(watch ? {} : { "data-media-video": "" })}
             data-force-controls="1"
             playsInline
             muted={watch ? undefined : true}
             preload="metadata"
             controls
+            poster={item.previewUrl || undefined}
             src={src}
           />
         <KindTag kind="video" />

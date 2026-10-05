@@ -1,7 +1,7 @@
 import { connectionsEnv } from "../connections/runtime.js";
 import { getCatalog, type AirtableRecord } from "../catalog/index.js";
 import { getScraper } from "../platforms/index.js";
-import { transferCdnToR2, type DetectedMedia } from "./r2.js";
+import { isHostedMediaUrl, transferCdnToR2, type DetectedMedia } from "./r2.js";
 import { readSaveStatus, saveStatusFields } from "./save-status.js";
 import { invalidateLibrary } from "./library-cache.js";
 
@@ -49,6 +49,7 @@ export type SaveMediaResult =
       savedCopy: string;
       bytes: number;
       key: string;
+      posterUrl?: string;
       postStatus?: { status: string; total: number; saved: number };
     }
   | {
@@ -125,26 +126,52 @@ export async function saveMediaCdnToR2(
       });
     }
 
+    const posterUrl = await saveVideoPoster(media, mediaRecordId, uploaded.kind);
     await updateMedia(mediaRecordId, {
       "Saved copy": uploaded.publicUrl,
       ...(cdnUrl !== storedUrl ? { "File link": cdnUrl } : {}),
       ...kindFields(uploaded),
       ...saveStatusFields("saved"),
       "Old file status": "stored",
+      ...(posterUrl ? { "Saved poster": posterUrl } : {}),
     });
     libraryChanged = true;
+    return {
+      ok: true,
+      mediaRecordId,
+      fileLink: cdnUrl,
+      savedCopy: uploaded.publicUrl,
+      bytes: uploaded.bytes,
+      key: uploaded.key,
+      posterUrl,
+    };
   } finally {
     if (libraryChanged) await invalidateLibrary();
   }
+}
 
-  return {
-    ok: true,
-    mediaRecordId,
-    fileLink: cdnUrl,
-    savedCopy: uploaded.publicUrl,
-    bytes: uploaded.bytes,
-    key: uploaded.key,
-  };
+async function saveVideoPoster(
+  media: AirtableRecord,
+  mediaRecordId: string,
+  kind: DetectedMedia["kind"],
+): Promise<string | undefined> {
+  if (kind !== "video" && String(media.fields.Type ?? "") !== "video") return undefined;
+  const preview = String(media.fields["Preview link"] ?? "").trim();
+  if (!preview) return undefined;
+  if (await isHostedMediaUrl(preview)) return preview;
+  try {
+    const poster = await transferCdnToR2({
+      url: preview,
+      mediaRecordId,
+      mediaType: "image",
+      objectKey: `social-hub/${mediaRecordId}/poster.jpg`,
+    });
+    return poster.publicUrl;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[save-media] poster failed", mediaRecordId, message);
+    return undefined;
+  }
 }
 
 function kindFields(uploaded: { kind: DetectedMedia["kind"]; fileType: string }) {

@@ -16,6 +16,18 @@ import { fetchJson, fmtNumber, hiResAvatar } from "@/lib/api";
 import { normalizeCaption } from "@/lib/caption";
 import { ExpandableText } from "@/components/expandable-text";
 
+function hostedPoster(url?: string): string | undefined {
+  if (!url || !/^https:\/\//i.test(url)) return undefined;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes("tiktokcdn")) return undefined;
+    if (host.endsWith(".r2.dev")) return url;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 type ScrapeResult = {
   ok: boolean;
   error?: string;
@@ -232,9 +244,10 @@ export function PullPage() {
                           <video
                             controls
                             playsInline
-                            className="aspect-square w-full object-cover"
+                            preload="metadata"
+                            className="aspect-square w-full bg-black object-cover"
                             src={src}
-                            poster={m.previewLink}
+                            poster={hostedPoster(m.previewLink)}
                           />
                         ) : (
                           <img

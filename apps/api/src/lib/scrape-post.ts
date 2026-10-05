@@ -247,6 +247,7 @@ export async function scrapePostPipeline(
       if (saved.ok) {
         m.savedCopy = saved.savedCopy;
         m.fileStatus = "saved";
+        if (!saved.skipped && saved.posterUrl) m.previewLink = saved.posterUrl;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

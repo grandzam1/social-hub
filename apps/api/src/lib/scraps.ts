@@ -18,6 +18,15 @@ async function listProfiles(pageSize?: number) {
 
 export type ScrapKind = "text" | "image" | "video";
 
+/** Images preview themselves. Videos preview only a poster we host. */
+export function libraryPreviewUrl(
+  kind: ScrapKind,
+  savedCopy: string | undefined,
+  savedPoster: string | undefined,
+): string | undefined {
+  return kind === "image" ? savedCopy : savedPoster;
+}
+
 export type ScrapItem = {
   id: string;
   kind: ScrapKind;
@@ -156,12 +165,13 @@ async function buildJoinedItems(): Promise<{
     const saveStatus = readSaveStatus(f);
     const savedCopy =
       saveStatus === "saved" ? asStr(f["Saved copy"]) : undefined;
+    const savedPoster = asStr(f["Saved poster"]);
 
     items.push({
       id: `media:${m.id}`,
       kind,
       text: asStr(post?.fields.Text),
-      previewUrl: kind === "image" ? savedCopy : undefined,
+      previewUrl: libraryPreviewUrl(kind, savedCopy, savedPoster),
       fileUrl: savedCopy,
       savedCopy,
       saveStatus,
