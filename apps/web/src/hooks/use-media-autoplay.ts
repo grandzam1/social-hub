@@ -1,6 +1,20 @@
 import { useEffect, useRef } from "react";
 import { usePrefsStore } from "@/lib/prefs";
 
+function prepVideo(video: HTMLVideoElement, autoplay: boolean) {
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute("playsinline", "");
+  if (autoplay) {
+    video.loop = true;
+    video.removeAttribute("controls");
+    return;
+  }
+  video.loop = false;
+  video.pause();
+  if (video.dataset.forceControls === "1") video.controls = true;
+}
+
 /** Apply autoplay prefs to videos marked with data-media-video. */
 export function useMediaAutoplay(rootRef?: React.RefObject<HTMLElement | null>) {
   const autoplay = usePrefsStore((s) => s.autoplay);
@@ -8,21 +22,6 @@ export function useMediaAutoplay(rootRef?: React.RefObject<HTMLElement | null>) 
 
   useEffect(() => {
     const root = rootRef?.current ?? document.body;
-    const videos = root.querySelectorAll<HTMLVideoElement>("video[data-media-video]");
-
-    const prep = (video: HTMLVideoElement) => {
-      video.muted = true;
-      video.playsInline = true;
-      video.setAttribute("playsinline", "");
-      if (autoplay) {
-        video.loop = true;
-        video.removeAttribute("controls");
-      } else {
-        video.loop = false;
-        video.pause();
-        if (video.dataset.forceControls === "1") video.controls = true;
-      }
-    };
 
     if (observerRef.current) {
       observerRef.current.disconnect();
@@ -34,9 +33,11 @@ export function useMediaAutoplay(rootRef?: React.RefObject<HTMLElement | null>) 
         (entries) => {
           for (const entry of entries) {
             const video = entry.target as HTMLVideoElement;
-            prep(video);
+            prepVideo(video, true);
             if (entry.isIntersecting && entry.intersectionRatio >= 0.45) {
-              void video.play().catch(() => {});
+              void video.play().catch(() => {
+                video.controls = true;
+              });
             } else {
               video.pause();
             }
@@ -46,11 +47,39 @@ export function useMediaAutoplay(rootRef?: React.RefObject<HTMLElement | null>) 
       );
     }
 
-    for (const video of videos) {
-      prep(video);
-      observerRef.current?.observe(video);
-    }
+    const bind = (video: HTMLVideoElement) => {
+      prepVideo(video, autoplay);
+      if (autoplay) observerRef.current?.observe(video);
+    };
 
-    return () => observerRef.current?.disconnect();
+    const scan = (node: ParentNode) => {
+      if (node instanceof HTMLVideoElement && node.matches("[data-media-video]")) {
+        bind(node);
+      }
+      if (!(node instanceof Element || node instanceof Document)) return;
+      for (const video of node.querySelectorAll<HTMLVideoElement>(
+        "video[data-media-video]",
+      )) {
+        bind(video);
+      }
+    };
+
+    scan(root);
+
+    // Scraps renders videos after the feed request resolves, and "Load more"
+    // adds more later. The preference effect alone runs before those nodes exist.
+    const mutations = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof HTMLElement) scan(node);
+        }
+      }
+    });
+    mutations.observe(root, { childList: true, subtree: true });
+
+    return () => {
+      mutations.disconnect();
+      observerRef.current?.disconnect();
+    };
   }, [autoplay, rootRef]);
 }

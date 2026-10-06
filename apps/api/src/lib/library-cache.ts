@@ -1,4 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getAppSecret } from "../connections/secrets.js";
 
 export const LIBRARY_KEY = "library:v1";
 const TTL_SECONDS = 60;
@@ -54,8 +56,8 @@ export async function deleteLibraryCache(): Promise<void> {
   await libraryKv.delete(LIBRARY_KEY);
 }
 
-export function isBustAuthorized(authorization: string | undefined): boolean {
-  const secret = process.env.LIBRARY_BUST_SECRET?.trim();
+export async function isBustAuthorized(authorization: string | undefined): Promise<boolean> {
+  const secret = (await getAppSecret(connectionsEnv(), "library_bust_secret"))?.trim();
   if (!secret) return false;
   const presented = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length).trim()
@@ -76,8 +78,8 @@ export async function invalidateLibrary(): Promise<void> {
       await libraryKv.delete(LIBRARY_KEY);
       return;
     }
-    const url = process.env.LIBRARY_BUST_URL?.trim();
-    const secret = process.env.LIBRARY_BUST_SECRET?.trim();
+    const url = (await getAppSecret(connectionsEnv(), "library_bust_url"))?.trim();
+    const secret = (await getAppSecret(connectionsEnv(), "library_bust_secret"))?.trim();
     if (!url || !secret) return;
     const res = await fetch(url, {
       method: "POST",

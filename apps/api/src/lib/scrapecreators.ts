@@ -1,3 +1,5 @@
+import { connectionsEnv } from "../connections/runtime.js";
+import { getAppSecret } from "../connections/secrets.js";
 import type { Platform } from "./types.js";
 import {
   readCached,
@@ -6,14 +8,10 @@ import {
   writeCached,
 } from "./sc-cache.js";
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env var: ${name}`);
-  return value;
-}
-
-function apiKey() {
-  return required("SCRAPECREATORS_API_KEY");
+async function apiKey(): Promise<string> {
+  const stored = (await getAppSecret(connectionsEnv(), "scrapecreators"))?.trim();
+  if (!stored) throw new Error("Missing env var: SCRAPECREATORS_API_KEY");
+  return stored;
 }
 
 export function detectPlatform(url: string): Platform {
@@ -38,14 +36,18 @@ export function assertSinglePostUrl(url: string, platform: Platform) {
     }
   }
   if (platform === "instagram") {
-    if (!/\/(p|reel|reels|tv)\//.test(u)) {
+    if (!/\/(p|reel|reels|tv|share)\//.test(u)) {
       throw new Error(
         "That looks like an Instagram profile. Paste a post/reel URL like https://www.instagram.com/reel/…",
       );
     }
   }
   if (platform === "tiktok") {
-    if (!/\/video\/\d+/.test(u) && !u.includes("vm.tiktok.com")) {
+    const short =
+      u.includes("vm.tiktok.com") ||
+      u.includes("vt.tiktok.com") ||
+      /tiktok\.com\/t\//.test(u);
+    if (!/\/video\/\d+/.test(u) && !short) {
       throw new Error(
         "That looks like a TikTok profile. Paste a video URL like https://www.tiktok.com/@user/video/123…",
       );
@@ -90,7 +92,7 @@ async function scGet(path: string, params: Record<string, string> = {}) {
   const url = qs
     ? `https://api.scrapecreators.com${path}?${qs}`
     : `https://api.scrapecreators.com${path}`;
-  const res = await fetch(url, { headers: { "x-api-key": apiKey() } });
+  const res = await fetch(url, { headers: { "x-api-key": await apiKey() } });
   const text = await res.text();
   let body: unknown;
   try {

@@ -1,4 +1,6 @@
 import { task } from "@trigger.dev/sdk";
+import { ensureDefaultDbProvider } from "../catalog/index.js";
+import { refreshPostSaveStatus } from "../lib/post-status.js";
 import {
   recordMediaSaveFailure,
   saveMediaCdnToR2,
@@ -20,5 +22,23 @@ export const saveMediaToR2 = task({
       message,
     });
   },
-  run: async (payload: SaveMediaInput) => saveMediaCdnToR2(payload),
+  run: async (payload: SaveMediaInput) => {
+    ensureDefaultDbProvider();
+    const postId = payload.postRecordId;
+    try {
+      return await saveMediaCdnToR2(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (payload.mediaRecordId) {
+        await recordMediaSaveFailure({
+          mediaRecordId: payload.mediaRecordId,
+          postRecordId: payload.postRecordId,
+          message,
+        });
+      }
+      throw error;
+    } finally {
+      if (postId) await refreshPostSaveStatus(postId);
+    }
+  },
 });

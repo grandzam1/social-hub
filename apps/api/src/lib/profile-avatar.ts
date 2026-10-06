@@ -1,17 +1,20 @@
-import { findPostLink, findProfile, updateProfile } from "./airtable.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog } from "../catalog/index.js";
+import { getScraper } from "../platforms/index.js";
 import { invalidateLibrary } from "./library-cache.js";
-import {
-  detectPlatform,
-  scrapeInstagramPost,
-  scrapeTikTokVideo,
-  scrapeTwitterTweet,
-} from "./scrapecreators.js";
-import {
-  normalizeInstagram,
-  normalizeTikTok,
-  normalizeX,
-} from "./normalize.js";
 import { isHostedMediaUrl, transferCdnToR2 } from "./r2.js";
+
+async function findPostLink(handle: string, platform: string) {
+  return (await getCatalog(connectionsEnv())).findPostLink(handle, platform);
+}
+
+async function findProfile(handle: string, platform: string) {
+  return (await getCatalog(connectionsEnv())).findProfile(handle, platform);
+}
+
+async function updateProfile(recordId: string, fields: Record<string, unknown>) {
+  return (await getCatalog(connectionsEnv())).updateProfile(recordId, fields);
+}
 
 const failed = new Set<string>();
 const inflight = new Map<string, Promise<string | null>>();
@@ -32,7 +35,7 @@ export async function saveAvatarToR2(options: {
   handle: string;
   sourceUrl: string;
 }): Promise<string> {
-  if (isHostedMediaUrl(options.sourceUrl)) return options.sourceUrl;
+  if (await isHostedMediaUrl(options.sourceUrl)) return options.sourceUrl;
   const uploaded = await transferCdnToR2({
     url: options.sourceUrl,
     objectKey: avatarKey(options.platform, options.handle),
@@ -43,7 +46,7 @@ export async function saveAvatarToR2(options: {
 }
 
 async function storedUrlWorks(url: string): Promise<boolean> {
-  if (!url || isHostedMediaUrl(url)) return false;
+  if (!url || (await isHostedMediaUrl(url))) return false;
   try {
     const res = await fetch(url, {
       method: "GET",
@@ -71,20 +74,8 @@ async function avatarFromExistingPost(
 ): Promise<string> {
   const link = await findPostLink(handle, platform);
   if (!link) return "";
-  const detected = detectPlatform(link);
-  const raw = (
-    detected === "instagram"
-      ? await scrapeInstagramPost(link)
-      : detected === "tiktok"
-        ? await scrapeTikTokVideo(link)
-        : await scrapeTwitterTweet(link)
-  ) as Record<string, unknown>;
-  const normalized =
-    detected === "instagram"
-      ? normalizeInstagram(raw, link)
-      : detected === "tiktok"
-        ? normalizeTikTok(raw, link)
-        : normalizeX(raw, link);
+  const scraper = await getScraper(connectionsEnv());
+  const normalized = await scraper.fetchPost(link);
   return normalized.authorAvatar?.trim() || "";
 }
 
@@ -114,7 +105,7 @@ export async function ensureSavedAvatar(
     const profile = await findProfile(handle, platform);
     if (!profile) return null;
     const current = String(profile.fields.Avatar ?? profile.fields.avatar ?? "");
-    if (current && isHostedMediaUrl(current)) return current;
+    if (current && (await isHostedMediaUrl(current))) return current;
     const source = await avatarSource(platform, handle, current);
     if (!source) {
       failed.add(key);

@@ -15,19 +15,33 @@ import {
   type LibraryKv,
 } from "./lib/library-cache.js";
 import { ensureSavedAvatar } from "./lib/profile-avatar.js";
-import { isHostedMediaUrl } from "./lib/r2.js";
+import { isHostedMediaUrl, measureR2Bucket, R2_INCLUDED_BYTES } from "./lib/r2.js";
+import { connectionsEnv } from "./connections/runtime.js";
+import { getAppSecret } from "./connections/secrets.js";
+import type { ConnectionsDb, ConnectionsEnv } from "./connections/index.js";
+import { getScraper } from "./platforms/index.js";
 import { listRecentPosts } from "./lib/recent-posts.js";
-import { getCreditBalance, getCreditUsage } from "./lib/scrapecreators.js";
+import { getCreditUsage } from "./lib/scrapecreators.js";
+import { createApifyProvider } from "./platforms/providers/apify.js";
+import { createScrapeCreatorsProvider } from "./platforms/providers/scrapecreators.js";
 import {
   listUsageEvents,
+  mergeUsageReading,
   recordScrapeCreatorsCreditSnapshot,
-  summarizeUsageEvents,
+  summarizeUsageSeries,
+  usageDisplayUnit,
+  usageServiceLabel,
   usageTrackingConfigured,
+  type UsageReading,
 } from "./lib/usage.js";
-
+import { connectionsRoutes } from "./http/routes/connections.js";
+import { settingsRoutes } from "./http/routes/settings.js";
+import { vaultRoutes } from "./http/routes/vault.js";
 export type WorkerBindings = {
   ASSETS?: Fetcher;
   LIBRARY_KV?: LibraryKv;
+  DB?: ConnectionsDb;
+  MASTER_KEY?: string;
   [key: string]: unknown;
 };
 
@@ -42,26 +56,39 @@ function getPublicDir(): string | null {
   }
 }
 
+async function providerCreditBalance(): Promise<number | null> {
+  const scraper = await getScraper(connectionsEnv());
+  if (!scraper.getCredits) return null;
+  const { remaining } = await scraper.getCredits();
+  return remaining;
+}
+
 export function createApp() {
   const app = new Hono<AppEnv>();
   const publicDir = getPublicDir();
+  app.route("/api/connections", connectionsRoutes);
+  app.route("/api/settings", settingsRoutes);
+  app.route("/api/vault", vaultRoutes);
 
-app.get("/health", (c) =>
-  c.json({
+app.get("/health", async (c) => {
+  const env = c.env as ConnectionsEnv;
+  const [trigger, airtable, account, access, secret, scrape] = await Promise.all([
+    getAppSecret(env, "trigger_secret_key"),
+    getAppSecret(env, "airtable_token"),
+    getAppSecret(env, "r2_account_id"),
+    getAppSecret(env, "r2_access_key_id"),
+    getAppSecret(env, "r2_secret_access_key"),
+    getAppSecret(env, "scrapecreators"),
+  ]);
+  return c.json({
     ok: true,
     service: "social-hub-api",
-    hasTrigger: Boolean(process.env.TRIGGER_SECRET_KEY),
-    hasAirtable: Boolean(
-      process.env.AIRTABLE_TOKEN || process.env.AIRTABLE_API_KEY,
-    ),
-    hasR2: Boolean(
-      process.env.R2_ACCOUNT_ID &&
-        process.env.R2_ACCESS_KEY_ID &&
-        process.env.R2_SECRET_ACCESS_KEY,
-    ),
-    hasScrapeCreators: Boolean(process.env.SCRAPECREATORS_API_KEY),
-  }),
-);
+    hasTrigger: Boolean(trigger),
+    hasAirtable: Boolean(airtable),
+    hasR2: Boolean(account && access && secret),
+    hasScrapeCreators: Boolean(scrape),
+  });
+});
 
 type SaveMediaBody = {
   mediaRecordId?: string;
@@ -131,7 +158,7 @@ app.post("/api/media/save-sync", async (c) => {
 });
 
 /**
- * Save every unsaved slide on one post. Saved slides and the post record stay as they are.
+ * Save every unsaved slide on one post, then set the post to Saved or Partial.
  */
 app.post("/api/media/save-unsaved", async (c) => {
   try {
@@ -179,8 +206,8 @@ app.post("/api/scrape-post", async (c) => {
 /** ScrapeCreators credit balance + recent charge history. */
 app.get("/api/credits", async (c) => {
   try {
-    const remaining = await getCreditBalance();
-    recordScrapeCreatorsCreditSnapshot(remaining);
+    const remaining = await providerCreditBalance();
+    if (remaining != null) recordScrapeCreatorsCreditSnapshot(remaining);
     return c.json({ ok: true, remaining });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -196,7 +223,7 @@ app.get("/api/credits/history", async (c) => {
     let remaining: number | null = null;
     let warning: string | undefined;
     try {
-      remaining = await getCreditBalance();
+      remaining = await providerCreditBalance();
       if (remaining != null) recordScrapeCreatorsCreditSnapshot(remaining);
     } catch (err) {
       warning = err instanceof Error ? err.message : String(err);
@@ -217,76 +244,87 @@ app.get("/api/credits/history", async (c) => {
  */
 app.get("/api/usage", async (c) => {
   try {
-    const configured = usageTrackingConfigured();
+    const configured = await usageTrackingConfigured();
     let events: Awaited<ReturnType<typeof listUsageEvents>> = [];
     let warning: string | undefined;
     if (configured) {
       try {
-        events = await listUsageEvents(100);
+        events = await listUsageEvents(500);
       } catch (err) {
         warning = err instanceof Error ? err.message : String(err);
         console.error("[api/usage] list", warning);
       }
     }
 
-    const summary = summarizeUsageEvents(events);
-
-    let creditsRemaining: number | null = null;
-    let creditsUsed: number | null = null;
+    let series = summarizeUsageSeries(events);
     let creditsWarning: string | undefined;
-    try {
-      creditsRemaining = await getCreditBalance();
-      if (creditsRemaining != null) {
-        recordScrapeCreatorsCreditSnapshot(creditsRemaining);
-      }
-    } catch (err) {
-      creditsWarning = err instanceof Error ? err.message : String(err);
-    }
-    try {
-      const history = await getCreditUsage(1);
-      creditsUsed = history.reduce(
-        (sum, row) => sum + (Number.isFinite(row.credits) ? row.credits : 0),
-        0,
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      creditsWarning = creditsWarning ? `${creditsWarning}; ${msg}` : msg;
-    }
-
-    // given = remaining + used only when both come from ScrapeCreators APIs
-    const creditsGiven =
-      creditsRemaining != null && creditsUsed != null
-        ? creditsRemaining + creditsUsed
-        : null;
-
-    const services = [
-      {
-        service: "ScrapeCreators",
-        unit: "credits" as const,
-        given: creditsGiven,
-        used: creditsUsed,
-        remaining: creditsRemaining,
-        source: "scrapecreators",
-      },
-      {
-        service: "Airtable",
-        unit: "requests" as const,
-        // No vendor quota in-app — only our recorded request count.
-        given: null,
-        used: summary.airtableRequests,
-        remaining: null,
-        source: "usage_events",
-      },
-      {
-        service: "R2",
-        unit: "bytes" as const,
-        // No bucket quota in-app — only recorded upload bytes.
-        given: null,
-        used: summary.r2UploadBytes,
-        remaining: null,
-        source: "usage_events",
-      },
+    const live: Array<{ name: string; reading: UsageReading }> = [
+      { name: "scrapecreators", reading: { service: "scrapecreators", unit: "credits" } },
+      { name: "apify", reading: { service: "apify", unit: "credits" } },
     ];
+    for (const item of live) {
+      try {
+        const provider =
+          item.name === "apify"
+            ? createApifyProvider(c.env)
+            : createScrapeCreatorsProvider();
+        const credits = await provider.getCredits?.();
+        if (!credits) continue;
+        if (item.name === "scrapecreators" && credits.remaining != null) {
+          recordScrapeCreatorsCreditSnapshot(credits.remaining);
+        }
+        series = mergeUsageReading(series, {
+          ...item.reading,
+          metric: "balance",
+          given: credits.given,
+          used: credits.used,
+          remaining: credits.remaining,
+          source: "live",
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        creditsWarning = creditsWarning ? `${creditsWarning}; ${message}` : message;
+      }
+    }
+
+    let storageDetail: string | undefined;
+    try {
+      const storage = await measureR2Bucket();
+      const remaining = Math.max(0, R2_INCLUDED_BYTES - storage.bytes);
+      series = mergeUsageReading(series, {
+        service: "r2",
+        unit: "bytes",
+        metric: "storage",
+        given: R2_INCLUDED_BYTES,
+        used: storage.bytes,
+        remaining,
+        source: "live",
+      });
+      const files = storage.objects.toLocaleString();
+      storageDetail = storage.truncated
+        ? `At least ${files} files. Listing stopped early. 10 GB of storage is included with R2.`
+        : `${files} files in the bucket. 10 GB of storage is included with R2.`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[api/usage] r2", message);
+      creditsWarning = creditsWarning ? `${creditsWarning}; ${message}` : message;
+    }
+
+    const services = series
+      .filter(
+        (row) => row.given != null || row.used != null || row.remaining != null,
+      )
+      .map((row) => ({
+        key: `${row.service}:${row.unit}`,
+        service: usageServiceLabel(row.service),
+        unit: usageDisplayUnit(row.unit),
+        metrics: row.metrics,
+        given: row.given,
+        used: row.used,
+        remaining: row.remaining,
+        source: row.source,
+        detail: row.service === "r2" && row.unit === "bytes" ? storageDetail : undefined,
+      }));
 
     return c.json({
       ok: true,
@@ -450,7 +488,7 @@ app.get("/api/media/download", async (c) => {
     return c.text("invalid url", 400);
   }
   if (parsed.protocol !== "https:") return c.text("invalid protocol", 400);
-  if (!isHostedMediaUrl(parsed.toString())) return c.text("host not allowed", 403);
+  if (!(await isHostedMediaUrl(parsed.toString()))) return c.text("host not allowed", 403);
 
   try {
     // Hono runs HEAD through this GET route, then drops the body. Do not fetch the file.
@@ -527,9 +565,17 @@ app.get("/api/avatar", async (c) => {
   }
 });
 
+/** Confirm the bust secret without deleting the scraps snapshot. */
+app.get("/internal/library-cache/bust", async (c) => {
+  if (!(await isBustAuthorized(c.req.header("authorization")))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
+  return c.json({ ok: true });
+});
+
 /** Drop the scraps library snapshot. Trigger.dev calls this after an async save. */
 app.post("/internal/library-cache/bust", async (c) => {
-  if (!isBustAuthorized(c.req.header("authorization"))) {
+  if (!(await isBustAuthorized(c.req.header("authorization")))) {
     return c.json({ ok: false, error: "unauthorized" }, 401);
   }
   try {

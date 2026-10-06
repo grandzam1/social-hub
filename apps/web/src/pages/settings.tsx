@@ -15,12 +15,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { usePrefsStore, type ThemePref } from "@/lib/prefs";
+import { ProvidersSection } from "@/features/settings/providers-section";
+import { usePrefsStore, type SaveAction, type ThemePref } from "@/lib/prefs";
 
 export function SettingsPage() {
   const autoplay = usePrefsStore((s) => s.autoplay);
+  const saveAction = usePrefsStore((s) => s.saveAction);
   const theme = usePrefsStore((s) => s.theme);
   const setAutoplay = usePrefsStore((s) => s.setAutoplay);
+  const setSaveAction = usePrefsStore((s) => s.setSaveAction);
   const setPrefTheme = usePrefsStore((s) => s.setTheme);
   const { setTheme } = useTheme();
 
@@ -56,6 +59,8 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+      <ProvidersSection />
+
       <Card>
         <CardHeader>
           <CardTitle>Media</CardTitle>
@@ -64,7 +69,7 @@ export function SettingsPage() {
             looped on Scraps.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <Label htmlFor="autoplay">Autoplay videos</Label>
             <Switch
@@ -72,6 +77,24 @@ export function SettingsPage() {
               checked={autoplay}
               onCheckedChange={setAutoplay}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="save-action">Save files</Label>
+            <Select
+              value={saveAction}
+              onValueChange={(value) => setSaveAction(value as SaveAction)}
+            >
+              <SelectTrigger id="save-action" className="w-full max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="download">Download</SelectItem>
+                <SelectItem value="share">Share</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              Download saves the file in the browser. Share opens the device share sheet.
+            </p>
           </div>
         </CardContent>
       </Card>

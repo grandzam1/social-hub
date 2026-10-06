@@ -16,7 +16,13 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fetchJson, fmtNumber, fmtWhen } from "@/lib/api";
 import { normalizeCaption } from "@/lib/caption";
+import { detectPlatform, normalizeUrl } from "@/lib/normalize-url";
+import { DownloadProgress } from "@/components/download-progress";
 import { ExpandableText } from "@/components/expandable-text";
+import {
+  overallDownloadPercent,
+  type DownloadStatus,
+} from "@/lib/download-file";
 import {
   cacheAgeLabel,
   feedMatches,
@@ -47,7 +53,7 @@ type Parsed = {
 };
 
 function parseProfileInput(raw: string): Parsed {
-  const input = String(raw || "").trim();
+  const input = normalizeUrl(String(raw || "")) ?? String(raw || "").trim();
   if (!input) {
     return {
       handle: "",
@@ -66,12 +72,9 @@ function parseProfileInput(raw: string): Parsed {
       const u = new URL(withProto);
       const host = u.hostname.replace(/^www\./, "").toLowerCase();
       const parts = u.pathname.split("/").filter(Boolean);
+      const platform = detectPlatform(u.toString());
 
-      if (
-        host === "x.com" ||
-        host === "twitter.com" ||
-        host === "mobile.twitter.com"
-      ) {
+      if (platform === "x") {
         const skip = new Set([
           "i",
           "home",
@@ -99,7 +102,7 @@ function parseProfileInput(raw: string): Parsed {
         }
       }
 
-      if (host === "instagram.com" || host === "instagr.am") {
+      if (platform === "instagram") {
         const skip = new Set([
           "p",
           "reel",
@@ -108,6 +111,7 @@ function parseProfileInput(raw: string): Parsed {
           "stories",
           "explore",
           "accounts",
+          "share",
         ]);
         let handle = parts[0] || "";
         if (skip.has(handle.toLowerCase())) {
@@ -128,7 +132,7 @@ function parseProfileInput(raw: string): Parsed {
         }
       }
 
-      if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
+      if (platform === "tiktok") {
         let handle = parts[0] || "";
         if (handle.startsWith("@")) handle = handle.slice(1);
         const skip = new Set([
@@ -139,8 +143,15 @@ function parseProfileInput(raw: string): Parsed {
           "tag",
           "music",
           "video",
+          "t",
         ]);
-        if (parts[0] === "video" || parts.includes("video")) {
+        if (
+          host === "vt.tiktok.com" ||
+          host === "vm.tiktok.com" ||
+          parts[0] === "t" ||
+          parts[0] === "video" ||
+          parts.includes("video")
+        ) {
           return {
             handle: "",
             tip: "That looks like a video link. Paste a profile URL.",
@@ -173,8 +184,9 @@ function parseProfileInput(raw: string): Parsed {
 type ProgressRow = {
   id: string;
   label: string;
-  state: "pending" | "run" | "ok" | "err";
-  pct: number;
+  status: "queued" | DownloadStatus;
+  percent: number;
+  total: number;
 };
 
 export function BatchPage() {
@@ -280,11 +292,12 @@ export function BatchPage() {
       ids.map((id) => ({
         id,
         label: (byId.get(id)?.caption || byId.get(id)?.url || id).slice(0, 48),
-        state: "pending" as const,
-        pct: 0,
+        status: "queued" as const,
+        percent: 0,
+        total: 0,
       })),
     );
-    setStatusMessage(`Downloading ${ids.length} selected post(s)…`);
+    setStatusMessage(`Saving ${ids.length} selected post(s)…`);
 
     async function scrapeOnce(url: string) {
       await fetchJson<{ ok: boolean; error?: string }>("/api/scrape-post", {
@@ -305,27 +318,22 @@ export function BatchPage() {
         );
 
       if (!post?.url) {
-        patch({ state: "err", label: "Missing URL", pct: 100 });
+        patch({ status: "failed", label: "Download failed", percent: 0, total: 0 });
         failCount++;
         continue;
       }
 
-      patch({ state: "run", label: "Scraping…", pct: 20 });
+      patch({ status: "preparing", percent: 0, total: 0 });
       try {
         try {
           await scrapeOnce(post.url);
         } catch {
-          patch({ state: "run", label: "Retrying…", pct: 40 });
           await scrapeOnce(post.url);
         }
-        patch({ state: "ok", label: "Saved", pct: 100 });
+        patch({ status: "done", percent: 100, total: 1 });
         okCount++;
-      } catch (err) {
-        patch({
-          state: "err",
-          label: err instanceof Error ? err.message : "Failed",
-          pct: 100,
-        });
+      } catch {
+        patch({ status: "failed", percent: 0, total: 0 });
         failCount++;
       }
     }
@@ -335,6 +343,53 @@ export function BatchPage() {
     if (okCount) toast.success(`${okCount} saved`);
     if (failCount) toast.error(`${failCount} failed`);
   }
+
+  async function retryOne(id: string) {
+    if (downloading) return;
+    const post = posts.find((item) => String(item.id) === id);
+    if (!post?.url) return;
+    setDownloading(true);
+    setProgress((prev) =>
+      prev.map((row) =>
+        row.id === id ? { ...row, status: "preparing", percent: 0, total: 0 } : row,
+      ),
+    );
+    try {
+      await fetchJson("/api/scrape-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: post.url, saveToR2: true }),
+      });
+      setProgress((prev) =>
+        prev.map((row) =>
+          row.id === id ? { ...row, status: "done", percent: 100, total: 1 } : row,
+        ),
+      );
+    } catch {
+      setProgress((prev) =>
+        prev.map((row) =>
+          row.id === id ? { ...row, status: "failed", percent: 0, total: 0 } : row,
+        ),
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const completedSaves = progress.filter((row) => row.status === "done").length;
+  const activeSave = progress.find(
+    (row) => row.status === "preparing" || row.status === "downloading" || row.status === "saving",
+  );
+  const activeSavePercent =
+    activeSave && activeSave.total > 0 ? activeSave.percent : activeSave ? null : 0;
+  const batchOverall = overallDownloadPercent(
+    completedSaves,
+    activeSavePercent,
+    progress.length,
+  );
+  const activePosition = activeSave
+    ? progress.findIndex((row) => row.id === activeSave.id) + 1
+    : Math.min(completedSaves + 1, progress.length);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
@@ -560,42 +615,74 @@ export function BatchPage() {
       ) : null}
 
       {progress.length > 0 ? (
-        <ul className="space-y-2 rounded-xl border border-border bg-card p-3 text-sm">
-          {progress.map((row) => (
-            <li key={row.id} className="space-y-1">
-              <div className="flex justify-between gap-2">
-                <span className="truncate font-medium">
-                  {(posts.find((p) => String(p.id) === row.id)?.caption ||
-                    row.id
-                  ).slice(0, 48)}
+        <div className="space-y-3 rounded-xl border border-border bg-card p-3">
+          <p className="text-sm text-muted-foreground">
+            Saving {activePosition} of {progress.length}
+          </p>
+          {activeSave ? (
+            <DownloadProgress
+              status={activeSave.status === "queued" ? "preparing" : activeSave.status}
+              percent={activeSave.percent}
+              total={activeSave.total}
+              label={
+                activeSave.status === "downloading"
+                  ? "Downloading video…"
+                  : activeSave.status === "saving"
+                    ? "Saving to device…"
+                    : "Preparing download…"
+              }
+            />
+          ) : null}
+          <DownloadProgress
+            status={batchOverall == null ? "downloading" : "downloading"}
+            percent={batchOverall ?? 0}
+            total={batchOverall == null ? 0 : 1}
+            label={batchOverall == null ? "Overall" : "Overall:"}
+          />
+          <ul className="space-y-2 text-sm">
+            {progress.map((row) => (
+              <li key={row.id} className="flex items-center justify-between gap-3">
+                <span className="truncate font-medium">{row.label}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={
+                      row.status === "failed"
+                        ? "text-destructive"
+                        : row.status === "done"
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                    }
+                  >
+                    {row.status === "queued"
+                      ? "Queued"
+                      : row.status === "preparing"
+                        ? "Preparing download…"
+                        : row.status === "downloading"
+                          ? row.total > 0
+                            ? `Downloading… ${row.percent}%`
+                            : "Downloading…"
+                          : row.status === "saving"
+                            ? "Saving to device…"
+                            : row.status === "done"
+                              ? "Saved"
+                              : "Download failed"}
+                  </span>
+                  {row.status === "failed" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={downloading}
+                      onClick={() => void retryOne(row.id)}
+                    >
+                      Retry
+                    </Button>
+                  ) : null}
                 </span>
-                <span
-                  className={
-                    row.state === "err"
-                      ? "text-destructive"
-                      : row.state === "ok"
-                        ? "text-primary"
-                        : "text-muted-foreground"
-                  }
-                >
-                  {row.state === "pending"
-                    ? "Queued"
-                    : row.state === "run"
-                      ? row.label
-                      : row.state === "ok"
-                        ? "Saved"
-                        : row.label}
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${row.pct}%` }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </div>
   );

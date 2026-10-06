@@ -5,12 +5,15 @@ const THEME_KEY = "social-hub.theme";
 const MEDIA_KEY = "social-hub.media.v1";
 
 export type ThemePref = "light" | "dark" | "system";
+export type SaveAction = "download" | "share";
 
 type PrefsState = {
   theme: ThemePref;
   autoplay: boolean;
+  saveAction: SaveAction;
   setTheme: (theme: ThemePref) => void;
   setAutoplay: (autoplay: boolean) => void;
+  setSaveAction: (saveAction: SaveAction) => void;
 };
 
 function readLegacyTheme(): ThemePref {
@@ -60,6 +63,7 @@ export const usePrefsStore = create<PrefsState>()(
     (set) => ({
       theme: readLegacyTheme(),
       autoplay: readLegacyAutoplay(),
+      saveAction: "download",
       setTheme: (theme) => {
         syncLegacyTheme(theme);
         set({ theme });
@@ -68,11 +72,16 @@ export const usePrefsStore = create<PrefsState>()(
         syncLegacyMedia(autoplay);
         set({ autoplay });
       },
+      setSaveAction: (saveAction) => set({ saveAction }),
     }),
     {
       name: "social-hub.prefs.v1",
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ theme: s.theme, autoplay: s.autoplay }),
+      partialize: (s) => ({
+        theme: s.theme,
+        autoplay: s.autoplay,
+        saveAction: s.saveAction,
+      }),
     },
   ),
 );

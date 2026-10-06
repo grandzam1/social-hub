@@ -1,31 +1,38 @@
-import {
-  findProfile,
-  updateMedia,
-  upsertMedia,
-  upsertPost,
-  upsertProfile,
-  updatePost,
-} from "./airtable.js";
-import {
-  detectPlatform,
-  assertSinglePostUrl,
-  scrapeInstagramPost,
-  scrapeTikTokVideo,
-  scrapeTwitterTweet,
-} from "./scrapecreators.js";
-import {
-  normalizeInstagram,
-  normalizeTikTok,
-  normalizeX,
-} from "./normalize.js";
+import { connectionsEnv } from "../connections/runtime.js";
+import { getCatalog } from "../catalog/index.js";
+import { getScraper } from "../platforms/index.js";
 import { recordMediaSaveFailure, saveMediaCdnToR2 } from "./save-media.js";
-import { refreshPostSaveStatus } from "./post-status.js";
 import { saveStatusFields } from "./save-status.js";
 import type { NormalizedScrape } from "./types.js";
 import { queueMediaSaves } from "./queue-media-save.js";
 import { isHostedMediaUrl } from "./r2.js";
 import { saveAvatarToR2 } from "./profile-avatar.js";
 import { invalidateLibrary } from "./library-cache.js";
+import { recordUsageEvent } from "./usage.js";
+
+async function catalog() {
+  return getCatalog(connectionsEnv());
+}
+
+async function findProfile(handle: string, platform: string) {
+  return (await catalog()).findProfile(handle, platform);
+}
+
+async function upsertProfile(fields: Record<string, unknown>) {
+  return (await catalog()).upsertProfile(fields);
+}
+
+async function upsertPost(fields: Record<string, unknown>) {
+  return (await catalog()).upsertPost(fields);
+}
+
+async function upsertMedia(fields: Record<string, unknown>) {
+  return (await catalog()).upsertMedia(fields);
+}
+
+async function updatePost(recordId: string, fields: Record<string, unknown>) {
+  return (await catalog()).updatePost(recordId, fields);
+}
 
 export type ScrapePostInput = {
   url: string;
@@ -75,32 +82,25 @@ export type ScrapePostResult = {
     save?: unknown;
   }>;
   saveMode: "sync" | "async" | "none";
+  saved?: boolean;
+  reason?: "queue_failed";
   creditsCharged?: number;
   creditsRemaining?: number;
   cached?: boolean;
+  provider_used?: string;
+  fallback?: boolean;
 };
 
 export async function scrapePostPipeline(
   input: ScrapePostInput,
 ): Promise<ScrapePostResult> {
+  // One request must make a small, fixed number of outbound calls.
+  // Anything that grows with slides or posts goes into a job.
   const url = String(input.url || "").trim();
   if (!url) throw new Error("url required");
 
-  const platform = detectPlatform(url);
-  assertSinglePostUrl(url, platform);
-  let raw: Record<string, unknown>;
-  let normalized: NormalizedScrape;
-
-  if (platform === "instagram") {
-    raw = await scrapeInstagramPost(url);
-    normalized = normalizeInstagram(raw, url);
-  } else if (platform === "tiktok") {
-    raw = await scrapeTikTokVideo(url);
-    normalized = normalizeTikTok(raw, url);
-  } else {
-    raw = await scrapeTwitterTweet(url);
-    normalized = normalizeX(raw, url);
-  }
+  const scraper = await getScraper(connectionsEnv());
+  const normalized = await scraper.fetchPost(url);
 
   // Ensure stable 0..n-1 order even if a normalizer gaps
   normalized.media = [...normalized.media]
@@ -112,7 +112,7 @@ export async function scrapePostPipeline(
     normalized.platform,
   );
   const existingAvatar = String(existingProfile?.fields.Avatar ?? "");
-  let avatar = isHostedMediaUrl(existingAvatar) ? existingAvatar : "";
+  let avatar = (await isHostedMediaUrl(existingAvatar)) ? existingAvatar : "";
   if (!avatar && normalized.authorAvatar) {
     try {
       avatar = await saveAvatarToR2({
@@ -174,7 +174,7 @@ export async function scrapePostPipeline(
     "Has media": hasMedia,
     Cover: normalized.cover,
     Profile: [profile.id],
-    "Post scraper": "scrapecreators",
+    "Post scraper": scraper.name,
     Status: hasMedia ? (saveToR2 ? "Saving" : "Scraped") : "No media",
     "Old pipeline": hasMedia
       ? saveToR2
@@ -201,7 +201,7 @@ export async function scrapePostPipeline(
       Height: asset.height,
       "Duration ms": asset.durationMs,
       "File type": asset.fileType,
-      "File scraper": "scrapecreators",
+      "File scraper": scraper.name,
       ...saveStatusFields("pending"),
       "Old file status": "cdn_ready",
       Label: `${normalized.platform} slide ${asset.order}`,
@@ -247,6 +247,7 @@ export async function scrapePostPipeline(
       if (saved.ok) {
         m.savedCopy = saved.savedCopy;
         m.fileStatus = "saved";
+        if (!saved.skipped && saved.posterUrl) m.previewLink = saved.posterUrl;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -265,6 +266,57 @@ export async function scrapePostPipeline(
     }
   };
 
+  let postStatus = hasMedia ? (saveToR2 ? "Saving" : "Scraped") : "No media";
+
+  const result = (
+    extra?: Pick<ScrapePostResult, "saved" | "reason">,
+  ): ScrapePostResult => ({
+    ok: true,
+    ...extra,
+    platform: normalized.platform,
+    profile: {
+      id: profile.id,
+      handle: normalized.authorHandle,
+      name: normalized.authorName,
+      avatar: avatar || undefined,
+    },
+    post: {
+      id: post.id,
+      postId: normalized.postId,
+      text: normalized.caption,
+      link: normalized.url,
+      status: postStatus,
+      postType: normalized.postType,
+      repostKind: normalized.repostKind,
+      quotedHandle: normalized.quotedHandle,
+      likes: normalized.likes,
+      comments: normalized.comments,
+      shares: normalized.shares,
+      views: normalized.views,
+      durationSec: normalized.durationSec,
+      mediaCount: mediaIds.length,
+    },
+    media: mediaOut.sort((a, b) => a.order - b.order),
+    saveMode,
+    creditsCharged: normalized.creditsCharged,
+    creditsRemaining: normalized.creditsRemaining,
+    cached: normalized.cached,
+    provider_used: normalized.providerUsed,
+    fallback: Boolean(normalized.fallbackUsed),
+  });
+
+  if (normalized.providerUsed) {
+    recordUsageEvent({
+      service: normalized.providerUsed === "apify" ? "apify" : "scrapecreators",
+      metric: "api_request",
+      delta: 1,
+      unit: "count",
+      path: "/api/scrape-post",
+      method: "POST",
+      detail: `provider_used=${normalized.providerUsed}; fallback=${normalized.fallbackUsed ? "yes" : "no"}`,
+    });
+  }
+
   if (saveMode === "async" && mediaOut.length) {
     const jobs = mediaOut.map((m) => ({
       mediaRecordId: m.id,
@@ -278,66 +330,25 @@ export async function scrapePostPipeline(
       for (const m of mediaOut) {
         m.fileStatus = "pending";
         m.save = { queued: true, batch };
-        try {
-          await updateMedia(m.id, saveStatusFields("pending"));
-        } catch (markErr) {
-          console.error("[scrape-post] failed to mark pending", m.id, markErr);
-        }
       }
-      await refreshPostSaveStatus(post.id, { saving: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn("[scrape-post] Trigger.dev queue failed; falling back to sync:", message);
-      saveMode = "sync";
-      for (const m of mediaOut) {
-        await saveOne(m, { fallbackFromAsync: true, queueError: message });
-      }
-      await refreshPostSaveStatus(post.id, { saving: true });
+      console.warn("[scrape-post] Trigger.dev queue failed:", message);
+      await updatePost(post.id, { Status: "Queue failed" });
+      postStatus = "Queue failed";
+      await invalidateLibrary();
+      return result({ saved: false, reason: "queue_failed" });
     }
   } else if (saveMode === "sync" && mediaOut.length) {
     for (const m of mediaOut) {
       await saveOne(m);
     }
-    await refreshPostSaveStatus(post.id, { saving: true });
-  } else if (hasMedia) {
-    await refreshPostSaveStatus(post.id);
+    const allSaved = mediaOut.every((m) => m.fileStatus === "saved");
+    postStatus = allSaved ? "Saved" : "Partial";
+    await updatePost(post.id, { Status: postStatus });
   }
-
-  const finalStatus = await refreshPostSaveStatus(post.id, {
-    saving: saveMode === "async",
-  });
 
   await invalidateLibrary();
 
-  return {
-    ok: true,
-    platform: normalized.platform,
-    profile: {
-      id: profile.id,
-      handle: normalized.authorHandle,
-      name: normalized.authorName,
-      avatar: avatar || undefined,
-    },
-    post: {
-      id: post.id,
-      postId: normalized.postId,
-      text: normalized.caption,
-      link: normalized.url,
-      status: finalStatus.status,
-      postType: normalized.postType,
-      repostKind: normalized.repostKind,
-      quotedHandle: normalized.quotedHandle,
-      likes: normalized.likes,
-      comments: normalized.comments,
-      shares: normalized.shares,
-      views: normalized.views,
-      durationSec: normalized.durationSec,
-      mediaCount: finalStatus.total,
-    },
-    media: mediaOut.sort((a, b) => a.order - b.order),
-    saveMode,
-    creditsCharged: normalized.creditsCharged,
-    creditsRemaining: normalized.creditsRemaining,
-    cached: normalized.cached,
-  };
+  return result();
 }
